@@ -1,7 +1,7 @@
 import { useOutletContext, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type DecisionSystem, type MLModel } from "@/lib/api";
-import { Users, Activity, BarChart3, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Users, Activity, BarChart3, AlertTriangle, CheckCircle2, Shield, Database } from "lucide-react";
 import { AreaChart, Area, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function SystemOverview() {

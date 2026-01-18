@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type DecisionSystem } from "@/lib/api";
-import { Plus, Server, Activity, ArrowRight, ShieldCheck, AlertTriangle } from "lucide-react";
+import { Plus, Server, Activity, ArrowRight, ShieldCheck, AlertTriangle, Clock, Shield } from "lucide-react";
 // import { cn } from "@/lib/utils";
 
 export default function DecisionSystems() {

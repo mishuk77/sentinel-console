@@ -178,7 +178,8 @@ export default function Datasets() {
                                         <span className={cn(
                                             "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset",
                                             ds.status === "PENDING" && "bg-yellow-50 text-yellow-800 ring-yellow-600/20",
-                                            (ds.status === "VALID" || ds.status === "READY") && "bg-green-50 text-green-800 ring-green-600/20",
+                                            // Map VALID to Green style (Ready)
+                                            ds.status === "VALID" && "bg-green-50 text-green-800 ring-green-600/20",
                                             ds.status === "INVALID" && "bg-red-50 text-red-800 ring-red-600/20",
                                             // @ts-ignore - FAILED is valid from API but missing in FE type def
                                             (ds.status as string) === "FAILED" && "bg-red-50 text-red-800 ring-red-600/20",
