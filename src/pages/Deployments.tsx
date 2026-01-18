@@ -22,7 +22,7 @@ export default function Deployments() {
     });
 
     const activeModel = models?.find(m => m.id === system.active_model_id);
-    const activePolicy = system.active_policy_summary;
+    // const activePolicy = system.active_policy_summary; // Unused
     const candidates = models?.filter(m => m.status === "CANDIDATE") || [];
 
     const deploymentList = [
@@ -44,7 +44,7 @@ export default function Deployments() {
 
 
 
-    const getCurlRaw = (modelId: string) => `curl -X POST "${baseUrl}/decisions/predict" \\
+    /* const getCurlRaw = (modelId: string) => `curl -X POST "${baseUrl}/decisions/predict" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model_id": "${modelId}",
@@ -53,7 +53,7 @@ export default function Deployments() {
       "income": 85000,
       "dti": 0.35
     }
-  }'`;
+  }'`; */
 
     const getPythonRaw = (modelId: string) => `import requests
 

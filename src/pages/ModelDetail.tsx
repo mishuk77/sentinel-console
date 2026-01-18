@@ -166,7 +166,7 @@ export default function ModelDetail() {
                                                 contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                                             />
                                             <Bar dataKey="importance" radius={[0, 4, 4, 0]} barSize={20}>
-                                                {featureImportance.map((entry: any, index: number) => (
+                                                {featureImportance.map((_: any, index: number) => (
                                                     <Cell key={`cell-${index}`} fill="#3b82f6" fillOpacity={1 - (index * 0.05)} />
                                                 ))}
                                             </Bar>

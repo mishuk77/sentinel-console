@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api, type DecisionSystem } from "@/lib/api";
 import { Plus, Server, ArrowRight, Clock, Shield } from "lucide-react";
 // import { cn } from "@/lib/utils";
