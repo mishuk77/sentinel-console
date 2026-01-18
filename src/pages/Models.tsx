@@ -6,7 +6,7 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Trophy, BarChart2, X, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useSystem } from "@/lib/hooks";
+// import { useSystem } from "@/lib/hooks"; // Unused
 
 export default function Models() {
     const { systemId } = useParams<{ systemId: string }>();
