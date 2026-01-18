@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Node
+node_modules/
+dist/
+build/
+coverage/
+
+# Database
+*.db
+*.sqlite3
+apps/api/sentinel.db
+
+# Config
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Sentinel specific
+local_storage/
+temp_*.csv
+temp_model_*.pkl
+*.pkl
+large_test_data.csv
+custom_loan_training.csv
+loan_ladder_test.csv
+debug_schema.py
+verify_loan_amount.py
+update_db_schema.py

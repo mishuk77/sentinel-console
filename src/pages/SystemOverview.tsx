@@ -1,0 +1,121 @@
+import { useOutletContext, Link } from "react-router-dom";
+import { type DecisionSystem, api } from "@/lib/api";
+import { Shield, Database, BrainCircuit, Activity, BarChart3, TrendingUp } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+export default function SystemOverview() {
+    const { system } = useOutletContext<{ system: DecisionSystem }>();
+
+    // Fetch Stats
+    const { data: stats } = useQuery({
+        queryKey: ["stats", system.id],
+        queryFn: async () => {
+            const res = await api.get("/decisions/stats/overview", { params: { system_id: system.id } });
+            return res.data;
+        },
+        refetchInterval: 5000
+    });
+
+    const hasHistory = stats?.history && stats.history.length > 0;
+
+    return (
+        <div className="p-8 space-y-8 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-2xl font-bold mb-1">System Overview</h2>
+                    <p className="text-muted-foreground">{system.description || "No description provided."}</p>
+                </div>
+                {/* Stats Summary */}
+                <div className="flex gap-4">
+                    <div className="bg-card border px-4 py-2 rounded-lg shadow-sm">
+                        <div className="text-xs text-muted-foreground font-medium uppercase">24h Volume</div>
+                        <div className="text-xl font-bold">{stats?.total_volume_24h || 0}</div>
+                    </div>
+                    <div className="bg-card border px-4 py-2 rounded-lg shadow-sm">
+                        <div className="text-xs text-muted-foreground font-medium uppercase">Approval Rate</div>
+                        <div className="text-xl font-bold">{(stats?.approval_rate_24h * 100 || 0).toFixed(1)}%</div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-card border rounded-xl p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-4 text-muted-foreground">
+                        <Shield className="h-5 w-5" />
+                        <span className="font-semibold text-sm uppercase tracking-wider">Active Model</span>
+                    </div>
+                    {system.active_model_summary ? (
+                        <div>
+                            <div className="text-xl font-bold text-foreground mb-1">{system.active_model_summary.name}</div>
+                            <div className="text-xs text-muted-foreground font-mono truncate">{system.active_model_summary.id}</div>
+                            <div className="mt-2 text-green-600 font-bold text-sm">AUC: {(system.active_model_summary.auc * 100).toFixed(1)}%</div>
+                        </div>
+                    ) : (
+                        <div className="text-muted-foreground text-sm">No active model.</div>
+                    )}
+                </div>
+
+                <div className="bg-card border rounded-xl p-6 shadow-sm">
+                    <div className="flex items-center gap-2 mb-4 text-muted-foreground">
+                        <Activity className="h-5 w-5" />
+                        <span className="font-semibold text-sm uppercase tracking-wider">Active Policy</span>
+                    </div>
+                    {system.active_policy_summary ? (
+                        <div>
+                            <div className="text-2xl font-bold text-foreground mb-1">
+                                <span className="text-sm text-muted-foreground mr-1">Threshold:</span>
+                                {system.active_policy_summary.threshold}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Est. Approval: {(system.active_policy_summary.approval_rate * 100).toFixed(1)}%</div>
+                        </div>
+                    ) : (
+                        <div className="text-muted-foreground text-sm">No active policy.</div>
+                    )}
+                </div>
+
+                {/* Chart Card */}
+                <div className="bg-card border rounded-xl p-6 shadow-sm md:col-span-2 flex flex-col">
+                    <div className="flex items-center gap-2 mb-4 text-muted-foreground">
+                        <BarChart3 className="h-5 w-5" />
+                        <span className="font-semibold text-sm uppercase tracking-wider">Volume Trend (7 Days)</span>
+                    </div>
+                    <div className="flex-1 w-full min-h-[120px]">
+                        {hasHistory ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={stats.history}>
+                                    <defs>
+                                        <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1} />
+                                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                    <XAxis dataKey="date" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                                    <Tooltip
+                                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                        labelStyle={{ fontSize: '12px', color: '#6B7280' }}
+                                    />
+                                    <Area type="monotone" dataKey="volume" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorVolume)" />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="h-full flex items-center justify-center text-sm text-muted-foreground bg-muted/20 rounded-lg">
+                                Not enough data to display trends.
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="border-t pt-8">
+                <h3 className="font-semibold mb-4">Quick Actions</h3>
+                <div className="flex gap-4">
+                    <Link to={`/systems/${system.id}/data`} className="flex items-center gap-2 px-4 py-2 bg-white border shadow-sm rounded-md hover:bg-gray-50 text-sm font-medium">
+                        <Database className="h-4 w-4 text-blue-500" /> Upload Data
+                    </Link>
+                </div>
+            </div>
+        </div>
+    );
+}
