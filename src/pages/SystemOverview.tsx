@@ -1,8 +1,8 @@
 import { useOutletContext, Link } from "react-router-dom";
-import { type DecisionSystem, api } from "@/lib/api";
-import { Shield, Database, BrainCircuit, Activity, BarChart3, TrendingUp } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { api, type DecisionSystem, type MLModel } from "@/lib/api";
+import { Users, Activity, BarChart3, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AreaChart, Area, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function SystemOverview() {
     const { system } = useOutletContext<{ system: DecisionSystem }>();

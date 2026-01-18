@@ -181,7 +181,7 @@ export default function Datasets() {
                                             (ds.status === "VALID" || ds.status === "READY") && "bg-green-50 text-green-800 ring-green-600/20",
                                             ds.status === "INVALID" && "bg-red-50 text-red-800 ring-red-600/20",
                                             // @ts-ignore - FAILED is valid from API but missing in FE type def
-                                            ds.status === "FAILED" && "bg-red-50 text-red-800 ring-red-600/20",
+                                            (ds.status as string) === "FAILED" && "bg-red-50 text-red-800 ring-red-600/20",
                                         )}>
                                             {ds.status === "VALID" ? "READY" : ds.status}
                                         </span>

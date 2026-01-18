@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Terminal, Server, ShieldCheck, Copy, Check, Activity, Percent } from "lucide-react";
+import { Terminal, Server, ShieldCheck, Copy, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useParams } from "react-router-dom";
 import { useSystem } from "@/lib/hooks";

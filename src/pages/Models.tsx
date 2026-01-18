@@ -175,13 +175,13 @@ export default function Models() {
                                     <div className="text-xs uppercase font-bold text-green-600 mb-2">Champion (Active)</div>
                                     <div className="text-lg font-bold">{activeModel.name}</div>
                                     <div className="text-sm text-muted-foreground">{activeModel.algorithm}</div>
-                                    <div className="mt-4 text-2xl font-mono">AUC: {(activeModel.metrics?.auc * 100).toFixed(2)}%</div>
+                                    <div className="mt-4 text-2xl font-mono">AUC: {((activeModel.metrics?.auc || 0) * 100).toFixed(2)}%</div>
                                 </div>
                                 <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-lg">
                                     <div className="text-xs uppercase font-bold text-blue-600 mb-2">Challenger (Candidate)</div>
                                     <div className="text-lg font-bold">{compareModel.name}</div>
                                     <div className="text-sm text-muted-foreground">{compareModel.algorithm}</div>
-                                    <div className="mt-4 text-2xl font-mono">AUC: {(compareModel.metrics?.auc * 100).toFixed(2)}%</div>
+                                    <div className="mt-4 text-2xl font-mono">AUC: {((compareModel.metrics?.auc || 0) * 100).toFixed(2)}%</div>
                                 </div>
                             </div>
 

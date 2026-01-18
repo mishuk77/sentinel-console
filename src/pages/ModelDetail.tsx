@@ -110,7 +110,20 @@ export default function ModelDetail() {
                                 <div className="text-sm">
                                     <div className="flex justify-between py-1">
                                         <span>Training Set</span>
-                                        <span className="font-medium">80%</span>
+                                        {model.metrics?.feature_importance?.map((entry: any, index: number) => (
+                                            <div key={index} className="space-y-1">
+                                                <div className="flex justify-between text-sm">
+                                                    <span className="font-medium">{entry.feature}</span>
+                                                    <span className="text-muted-foreground">{(entry.importance * 100).toFixed(1)}%</span>
+                                                </div>
+                                                <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-primary"
+                                                        style={{ width: `${entry.importance * 100}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                     <div className="flex justify-between py-1">
                                         <span>Validation Set</span>
