@@ -1,3 +1,4 @@
+import React from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "@/components/layout/Layout";
@@ -12,42 +13,55 @@ import Decisions from "@/pages/Decisions";
 import DecisionSystems from "@/pages/DecisionSystems";
 import SystemLayout from "@/pages/SystemLayout";
 import SystemOverview from "@/pages/SystemOverview";
+import Login from "@/pages/Login";
+import { AuthProvider, useAuth } from "@/lib/AuthContext";
+import { Navigate } from "react-router-dom";
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return children;
+}
 
 const queryClient = new QueryClient();
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
 
-            {/* Systems Global List */}
-            <Route path="/systems" element={<DecisionSystems />} />
+            <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+              <Route path="/" element={<Dashboard />} />
 
-            {/* Scoped System Routes */}
-            <Route path="/systems/:systemId" element={<SystemLayout />}>
-              <Route path="overview" element={<SystemOverview />} />
-              <Route path="data" element={<Datasets />} />
-              <Route path="training" element={<TrainingJobs />} />
-              <Route path="models" element={<Models />} />
-              <Route path="models/:id" element={<ModelDetail />} />
-              <Route path="policy" element={<Policy />} />
-              <Route path="deployments" element={<Deployments />} />
+              {/* Systems Global List */}
+              <Route path="/systems" element={<DecisionSystems />} />
+
+              {/* Scoped System Routes */}
+              <Route path="/systems/:systemId" element={<SystemLayout />}>
+                <Route path="overview" element={<SystemOverview />} />
+                <Route path="data" element={<Datasets />} />
+                <Route path="training" element={<TrainingJobs />} />
+                <Route path="models" element={<Models />} />
+                <Route path="models/:id" element={<ModelDetail />} />
+                <Route path="policy" element={<Policy />} />
+                <Route path="deployments" element={<Deployments />} />
+              </Route>
+
+              {/* Global Decisions */}
+              <Route path="/decisions" element={<Decisions />} />
+
+              {/* Monitoring Alias */}
+              <Route path="/monitoring" element={<Dashboard />} />
+
+              {/* Legacy/Redirects or miscellaneous */}
+              <Route path="/deployments" element={<Deployments />} />
             </Route>
-
-            {/* Global Decisions */}
-            <Route path="/decisions" element={<Decisions />} />
-
-            {/* Monitoring Alias */}
-            <Route path="/monitoring" element={<Dashboard />} />
-
-            {/* Legacy/Redirects or miscellaneous */}
-            <Route path="/deployments" element={<Deployments />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

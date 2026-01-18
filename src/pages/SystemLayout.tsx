@@ -1,11 +1,14 @@
-import { Outlet, NavLink, useParams, Link } from "react-router-dom";
+import { Outlet, NavLink, useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type DecisionSystem } from "@/lib/api";
-import { LayoutDashboard, Database, BrainCircuit, Shield, ArrowLeft, Globe, Settings as Sliders } from "lucide-react";
+import { useAuth } from "@/lib/AuthContext";
+import { LayoutDashboard, Database, BrainCircuit, Shield, ArrowLeft, Globe, Settings as Sliders, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function SystemLayout() {
     const { systemId } = useParams<{ systemId: string }>();
+    const { logout } = useAuth();
+    const navigate = useNavigate();
 
     const { data: system, isLoading } = useQuery<DecisionSystem>({
         queryKey: ["system", systemId],
@@ -15,6 +18,11 @@ export default function SystemLayout() {
         },
         enabled: !!systemId
     });
+
+    const handleLogout = () => {
+        logout();
+        navigate("/login");
+    };
 
     if (isLoading) return <div className="p-12 text-center text-muted-foreground">Loading system context...</div>;
     if (!system) return <div className="p-12 text-center text-red-500">System not found</div>;
@@ -43,8 +51,17 @@ export default function SystemLayout() {
                         <p className="text-xs text-muted-foreground font-mono">ID: {system.id}</p>
                     </div>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                    Decision System Workspace
+                <div className="flex items-center gap-4">
+                    <div className="text-xs text-muted-foreground">
+                        Decision System Workspace
+                    </div>
+                    <button
+                        onClick={handleLogout}
+                        className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground hover:text-red-500"
+                        title="Sign out"
+                    >
+                        <LogOut className="h-4 w-4" />
+                    </button>
                 </div>
             </div>
 
