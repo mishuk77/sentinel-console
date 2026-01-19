@@ -6,7 +6,6 @@ import { Plus, Server, ArrowRight, Clock, Shield, Trash2 } from "lucide-react";
 // import { cn } from "@/lib/utils";
 
 export default function DecisionSystems() {
-    // const navigate = useNavigate(); // Unused
     const queryClient = useQueryClient();
     const [isCreating, setIsCreating] = useState(false);
     const [newName, setNewName] = useState("");

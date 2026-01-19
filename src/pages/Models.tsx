@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils";
 
 export default function Models() {
     const { systemId } = useParams<{ systemId: string }>();
-    // const { system } = useSystem(); // Unused
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const [compareModel, setCompareModel] = useState<MLModel | null>(null);
