@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useParams } from "react-router-dom";
 import { useSystem } from "@/lib/hooks";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Scale, Check, AlertTriangle } from "lucide-react";
+import { Scale, Check, AlertTriangle, Trash2 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -398,6 +398,94 @@ export default function Policy() {
                 </div>
 
             </div>
+
+            {/* Policy History Section */}
+            <div className="bg-card border rounded-xl shadow-sm overflow-hidden mt-8">
+                <div className="px-6 py-4 border-b">
+                    <h3 className="font-semibold text-lg">Policy History</h3>
+                </div>
+                <PolicyList systemId={systemId} />
+            </div>
+
+        </div>
+    );
+}
+
+function PolicyList({ systemId }: { systemId?: string }) {
+    const queryClient = useQueryClient();
+    const { data: policies } = useQuery<any[]>({
+        queryKey: ["policies", systemId],
+        queryFn: async () => {
+            if (!systemId) return [];
+            const res = await api.get("/policies/", { params: { system_id: systemId } });
+            return res.data;
+        },
+        enabled: !!systemId
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: async (id: string) => {
+            await api.delete(`/policies/${id}`);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["policies"] });
+        },
+        onError: (err: any) => {
+            const msg = err.response?.data?.detail || "Failed to delete policy.";
+            alert(msg);
+        }
+    });
+
+    if (!policies?.length) return null;
+
+    return (
+        <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+                <thead className="bg-muted/50 text-muted-foreground uppercase font-medium">
+                    <tr>
+                        <th className="px-6 py-3">Created At</th>
+                        <th className="px-6 py-3">Threshold</th>
+                        <th className="px-6 py-3">Target</th>
+                        <th className="px-6 py-3">Status</th>
+                        <th className="px-6 py-3 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y">
+                    {policies.map((p) => (
+                        <tr key={p.id} className="hover:bg-muted/50 transition-colors">
+                            <td className="px-6 py-4 text-xs font-mono">
+                                {new Date(p.created_at).toLocaleDateString()}
+                            </td>
+                            <td className="px-6 py-4">{p.threshold?.toFixed(4)}</td>
+                            <td className="px-6 py-4">
+                                {p.target_decile ? `${p.target_decile * 10}%` : "-"}
+                            </td>
+                            <td className="px-6 py-4">
+                                {p.is_active ? (
+                                    <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded-full text-xs font-bold">ACTIVE</span>
+                                ) : (
+                                    <span className="text-muted-foreground text-xs">Inactive</span>
+                                )}
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                                {!p.is_active && (
+                                    <button
+                                        onClick={() => {
+                                            if (window.confirm("Delete this policy?")) {
+                                                deleteMutation.mutate(p.id);
+                                            }
+                                        }}
+                                        className="text-muted-foreground hover:text-red-600 transition-colors"
+                                        title="Delete Policy"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </button>
+                                )}
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
         </div>
     );
 }

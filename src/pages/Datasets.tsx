@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dataset } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Loader2, FileText, Upload, AlertCircle } from "lucide-react";
+import { Loader2, FileText, Upload, AlertCircle, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Datasets() {
@@ -41,6 +41,20 @@ export default function Datasets() {
             console.error(err);
             setUploadError("Failed to upload dataset. Ensure it is a valid CSV.");
         },
+    });
+
+    // Delete Mutation
+    const deleteMutation = useMutation({
+        mutationFn: async (id: string) => {
+            await api.delete(`/datasets/${id}`);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["datasets"] });
+        },
+        onError: (err) => {
+            console.error(err);
+            alert("Failed to delete dataset.");
+        }
     });
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -189,6 +203,19 @@ export default function Datasets() {
                                     </td>
                                     <td className="px-6 py-4 text-muted-foreground text-xs">
                                         {new Date(ds.created_at).toLocaleDateString()} <span className="text-gray-300">|</span> {new Date(ds.created_at).toLocaleTimeString()}
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <button
+                                            onClick={() => {
+                                                if (window.confirm("Are you sure you want to delete this dataset?")) {
+                                                    deleteMutation.mutate(ds.id);
+                                                }
+                                            }}
+                                            className="text-muted-foreground hover:text-red-600 transition-colors p-2 rounded-full hover:bg-red-50"
+                                            title="Delete Dataset"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
                                     </td>
                                 </tr>
                             ))}

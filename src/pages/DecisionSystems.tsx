@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type DecisionSystem } from "@/lib/api";
-import { Plus, Server, ArrowRight, Clock, Shield } from "lucide-react";
+import { Plus, Server, ArrowRight, Clock, Shield, Trash2 } from "lucide-react";
 // import { cn } from "@/lib/utils";
 
 export default function DecisionSystems() {
@@ -30,6 +30,19 @@ export default function DecisionSystems() {
             setIsCreating(false);
             setNewName("");
             setNewDesc("");
+        }
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: async (id: string) => {
+            await api.delete(`/systems/${id}`);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["systems"] });
+        },
+        onError: (err) => {
+            console.error(err);
+            alert("Failed to delete system.");
         }
     });
 
@@ -106,7 +119,21 @@ export default function DecisionSystems() {
                             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-100 transition-colors">
                                 <Server className="h-6 w-6" />
                             </div>
-                            <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-transform group-hover:translate-x-1" />
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={(e) => {
+                                        e.preventDefault(); // Prevent navigation
+                                        if (window.confirm(`Are you sure you want to delete system "${sys.name}"? This will delete ALL associated data, models, and policies.`)) {
+                                            deleteMutation.mutate(sys.id);
+                                        }
+                                    }}
+                                    className="p-1 text-muted-foreground hover:text-red-600 transition-colors z-20 relative"
+                                    title="Delete System"
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                                </button>
+                                <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-transform group-hover:translate-x-1" />
+                            </div>
                         </div>
 
                         <h3 className="font-semibold text-xl mb-2 group-hover:text-primary transition-colors">{sys.name}</h3>

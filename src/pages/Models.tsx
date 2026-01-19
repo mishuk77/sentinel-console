@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Trophy, BarChart2, X, ArrowRight } from "lucide-react";
+import { Trophy, BarChart2, X, ArrowRight, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 // import { useSystem } from "@/lib/hooks"; // Unused
 
@@ -12,6 +12,7 @@ export default function Models() {
     const { systemId } = useParams<{ systemId: string }>();
     // const { system } = useSystem(); // Unused
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const [compareModel, setCompareModel] = useState<MLModel | null>(null);
 
     // Fetch Models
@@ -22,6 +23,21 @@ export default function Models() {
             return res.data;
         },
         enabled: !!systemId
+    });
+
+    // Delete Mutation
+    const deleteMutation = useMutation({
+        mutationFn: async (id: string) => {
+            await api.delete(`/models/${id}`);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["models"] });
+        },
+        onError: (err: any) => {
+            console.error(err);
+            const msg = err.response?.data?.detail || "Failed to delete model.";
+            alert(msg);
+        }
     });
 
     const candidates = models?.filter(m => m.status === "CANDIDATE" || m.status === "ACTIVE") || [];
@@ -139,6 +155,17 @@ export default function Models() {
                                                 className="inline-flex items-center text-sm font-medium text-primary hover:underline hover:text-primary/80"
                                             >
                                                 Configure Policy <ArrowRight className="ml-1 h-4 w-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    if (window.confirm(`Are you sure you want to delete model "${m.name}"?`)) {
+                                                        deleteMutation.mutate(m.id);
+                                                    }
+                                                }}
+                                                className="inline-flex items-center text-sm font-medium text-muted-foreground hover:text-red-600 transition-colors p-1"
+                                                title="Delete Model"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
                                             </button>
                                         </td>
                                     </tr>
