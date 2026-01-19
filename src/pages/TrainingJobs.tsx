@@ -27,7 +27,10 @@ export default function TrainingJobs() {
         enabled: !!systemId
     });
 
-    // Fetch Models (Jobs) - Poll every 3s if any are training
+    // State to track if we just triggered a job (to force polling)
+    const [justStarted, setJustStarted] = useState(false);
+
+    // Fetch Models (Jobs) - Poll every 1s if any are training OR we just started one
     const { data: models } = useQuery<MLModel[]>({
         queryKey: ["models", systemId],
         queryFn: async () => {
@@ -38,9 +41,19 @@ export default function TrainingJobs() {
         refetchInterval: (query) => {
             // If any model is in TRAINING state, poll
             const isTraining = query.state.data?.some(m => m.status === "TRAINING");
-            return isTraining ? 3000 : false;
+            return (isTraining || justStarted) ? 1000 : false;
         }
     });
+
+    // Reset justStarted if we see training models
+    if (justStarted && models?.some(m => m.status === "TRAINING")) {
+        setJustStarted(false);
+    }
+
+    // Safety timeout to stop polling if nothing shows up after 15s
+    if (justStarted) {
+        setTimeout(() => setJustStarted(false), 15000);
+    }
 
     // Start Training Mutation
     const trainMutation = useMutation({
@@ -52,10 +65,12 @@ export default function TrainingJobs() {
             setError(null);
             setWizardStep(0); // Reset
             setSelectedDataset("");
+            setJustStarted(true); // Trigger polling
         },
         onError: (err) => {
             console.error(err);
             setError("Failed to start training.");
+            setJustStarted(false);
         },
     });
 
@@ -372,6 +387,16 @@ export default function TrainingJobs() {
                     <h3 className="font-semibold text-lg">Active Jobs & Results</h3>
                 </div>
 
+                {justStarted && (!models || !models.some(m => m.status === "TRAINING")) && (
+                    <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-5 animate-pulse flex items-center gap-4">
+                        <Loader2 className="h-6 w-6 text-blue-600 animate-spin" />
+                        <div>
+                            <h4 className="font-semibold text-blue-900">Initializing Training Environment...</h4>
+                            <p className="text-sm text-blue-700">Allocating resources and starting algorithms.</p>
+                        </div>
+                    </div>
+                )}
+
                 {models && models.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {(() => {
@@ -439,9 +464,11 @@ export default function TrainingJobs() {
                         })()}
                     </div>
                 ) : (
-                    <div className="p-12 text-center text-muted-foreground bg-gray-50 rounded-xl border border-dashed">
-                        No training jobs started yet.
-                    </div>
+                    !justStarted && (
+                        <div className="p-12 text-center text-muted-foreground bg-gray-50 rounded-xl border border-dashed">
+                            No training jobs started yet.
+                        </div>
+                    )
                 )}
             </div>
         </div>
