@@ -412,6 +412,14 @@ export default function Policy() {
                 )}
             </div>
 
+            {/* Policy History Section */}
+            <div className="bg-card border rounded-xl shadow-sm overflow-hidden mt-8">
+                <div className="px-6 py-4 border-b">
+                    <h3 className="font-semibold text-lg">Policy History</h3>
+                </div>
+                <PolicyList systemId={systemId} />
+            </div>
+
         </div>
     );
 }
