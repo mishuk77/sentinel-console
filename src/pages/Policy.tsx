@@ -130,25 +130,19 @@ export default function Policy() {
         if (!models) return;
 
         // 1. Resolve Model ID
-        let targetModelId = selectedModelId;
-        if (!targetModelId) {
-            if (initialModelId && models.find(m => m.id === initialModelId)) {
-                targetModelId = initialModelId;
-            } else if (system?.active_model_id) {
-                // Confirm valid in this list (it should be)
-                if (models.find(m => m.id === system.active_model_id)) {
-                    targetModelId = system.active_model_id;
-                }
-            }
-        }
+        // 1. Resolve Active Model ONLY
+        const activeModelId = system?.active_model_id;
 
-        if (targetModelId && targetModelId !== selectedModelId) {
-            setSelectedModelId(targetModelId);
+        if (activeModelId && activeModelId !== selectedModelId) {
+            setSelectedModelId(activeModelId);
+        } else if (!activeModelId && selectedModelId) {
+            // Clear selection if no active model (strict mode)
+            setSelectedModelId("");
         }
 
         // 2. Resolve Policy Defaults (Target Decile)
         // Only do this once on load if we matched the active model
-        if (targetModelId && targetModelId === system?.active_model_id) {
+        if (activeModelId && activeModelId === system?.active_model_id) {
             const activeDecile = system.active_policy_summary?.target_decile;
             if (activeDecile) {
                 setTargetDecile(activeDecile);
@@ -197,217 +191,230 @@ export default function Policy() {
 
                 {/* Controls */}
                 <div className="lg:col-span-1 space-y-6">
-                    <div className="bg-card border rounded-xl p-6 shadow-sm space-y-6">
-                        <div>
-                            <label className="text-sm font-medium mb-2 block">Model Version</label>
-                            <select
-                                className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                value={selectedModelId}
-                                onChange={(e) => setSelectedModelId(e.target.value)}
-                            >
-                                <option value="">Select Model...</option>
-                                {models.map(m => (
-                                    <option key={m.id} value={m.id}>
-                                        {m.name} ({m.algorithm}) - AUC: {m.metrics?.auc ? (m.metrics.auc * 100).toFixed(1) : 0}%
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {selectedModel && (
-                            <>
-                                <div>
-                                    <div className="flex justify-between mb-2">
-                                        <label className="text-sm font-medium">Population Acceptance Target</label>
-                                        <span className="text-sm font-bold text-primary">{targetDecile * 10}%</span>
-                                    </div>
-                                    <input
-                                        type="range"
-                                        min="1" max="10" step="1"
-                                        className="w-full cursor-pointer h-2 bg-secondary rounded-lg appearance-none cursor-pointer"
-                                        value={targetDecile}
-                                        onChange={(e) => setTargetDecile(Number(e.target.value))}
-                                    />
-                                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                                        <span>Selective (10%)</span>
-                                        <span>All In (100%)</span>
-                                    </div>
+                    <div>
+                        <label className="text-sm font-medium mb-2 block">Active Model</label>
+                        {selectedModel ? (
+                            <div className="p-4 bg-muted/20 border rounded-lg space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-bold text-foreground">{selectedModel.name}</span>
+                                    <span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-0.5 rounded-full">ACTIVE</span>
                                 </div>
-
-                                <div className="pt-4 border-t space-y-4">
-                                    <div>
-                                        <h4 className="text-xs uppercase text-muted-foreground font-semibold">Recommended Cutoff</h4>
-                                        <p className="text-2xl font-bold font-mono">
-                                            {(analysis?.stats?.cutoff || 0).toFixed(4)}
-                                        </p>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <h4 className="text-xs uppercase text-muted-foreground font-semibold">Proj. Approval</h4>
-                                            <p className="text-lg font-bold text-green-600">
-                                                {((analysis?.stats?.approvalRate || 0) * 100).toFixed(1)}%
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <h4 className="text-xs uppercase text-muted-foreground font-semibold">Proj. Loss</h4>
-                                            <p className="text-lg font-bold text-red-600">
-                                                {((analysis?.stats?.lossRate || 0) * 100).toFixed(2)}%
-                                            </p>
-                                        </div>
-                                    </div>
+                                <div className="text-sm text-muted-foreground flex justify-between">
+                                    <span className="capitalize">{selectedModel.algorithm?.replace("_", " ")}</span>
+                                    <span className="font-mono">AUC: {selectedModel.metrics?.auc ? (selectedModel.metrics.auc * 100).toFixed(1) : 0}%</span>
                                 </div>
-
-                                <div className="pt-4 border-t">
-                                    <label className="text-sm font-medium mb-1 block">Policy Name</label>
-                                    <input
-                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm mb-4"
-                                        value={policyName}
-                                        onChange={(e) => setPolicyName(e.target.value)}
-                                    />
-
-                                    <button
-                                        onClick={() => activateMutation.mutate()}
-                                        disabled={activateMutation.isPending}
-                                        className={cn(
-                                            "w-full inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors h-10 px-4 py-2",
-                                            activationSuccess
-                                                ? "bg-green-600 text-white hover:bg-green-700"
-                                                : "bg-primary text-primary-foreground hover:bg-primary/90"
-                                        )}
-                                    >
-                                        {activateMutation.isPending ? "Activating..." : activationSuccess ? "Activated!" : "Activate Policy"}
-                                        {activationSuccess && <Check className="ml-2 h-4 w-4" />}
-                                    </button>
-                                </div>
-                            </>
+                            </div>
+                        ) : (
+                            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                                <p className="font-bold flex items-center gap-2">
+                                    <AlertTriangle className="h-4 w-4" /> No Active Model
+                                </p>
+                                <p className="mt-2 text-xs">
+                                    You must activate a candidate model in the Registry before configuring policies.
+                                </p>
+                                <button
+                                    onClick={() => window.location.href = `/systems/${systemId}/models`}
+                                    className="mt-3 text-primary font-bold hover:underline"
+                                >
+                                    Go to Model Registry &rarr;
+                                </button>
+                            </div>
                         )}
                     </div>
-                </div>
 
-                {/* Charts & Tables */}
-                <div className="lg:col-span-2 space-y-6">
-                    {!selectedModel ? (
-                        <div className="bg-card border rounded-xl p-12 flex flex-col items-center justify-center text-muted-foreground h-full min-h-[400px]">
-                            <Scale className="h-12 w-12 mb-4 opacity-20" />
-                            <p>Select a model to analyze impact.</p>
-                        </div>
-                    ) : !analysis ? (
-                        <div className="bg-card border rounded-xl p-12 flex flex-col items-center justify-center text-muted-foreground">
-                            <AlertTriangle className="h-12 w-12 mb-4 opacity-50 text-yellow-500" />
-                            <p>No calibration data available for this model.</p>
-                            <p className="text-sm mt-2">Try training a new model to generate metrics.</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-6">
-                            {/* Risk Chart */}
-                            <div className="bg-card border rounded-xl p-6 shadow-sm">
-                                <h3 className="font-semibold mb-6">Risk by Decile</h3>
-                                <div className="h-[300px] w-full">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={analysis.data} barCategoryGap="10%">
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                            {/* Use number axis to allow continuous background areas */}
-                                            <XAxis
-                                                dataKey="decile"
-                                                type="number"
-                                                domain={[0.5, 10.5]}
-                                                ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
-                                                label={{ value: 'Risk Decile (Low -> High)', position: 'insideBottom', offset: -5 }}
-                                            />
-                                            <YAxis label={{ value: 'Risk %', angle: -90, position: 'insideLeft' }} />
-                                            <Tooltip cursor={{ fill: 'transparent' }} />
-                                            <Legend />
-
-                                            {cutoffDecile > 0 && (
-                                                <ReferenceArea x1={0.5} x2={cutoffDecile + 0.5} y1={0} fill="green" fillOpacity={0.1} />
-                                            )}
-                                            {/* If we select 10 (100%), no red area. 
-                                            If we select 9, red is 9.5 to 10.5 
-                                        */}
-                                            {cutoffDecile < 10 && (
-                                                <ReferenceArea x1={cutoffDecile + 0.5} x2={10.5} y1={0} fill="red" fillOpacity={0.1} />
-                                            )}
-
-                                            <Bar dataKey="risk" fill="#8884d8" name="Decile Risk %" />
-                                        </BarChart>
-                                    </ResponsiveContainer>
+                    {selectedModel && (
+                        <>
+                            <div>
+                                <div className="flex justify-between mb-2">
+                                    <label className="text-sm font-medium">Population Acceptance Target</label>
+                                    <span className="text-sm font-bold text-primary">{targetDecile * 10}%</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="1" max="10" step="1"
+                                    className="w-full cursor-pointer h-2 bg-secondary rounded-lg appearance-none cursor-pointer"
+                                    value={targetDecile}
+                                    onChange={(e) => setTargetDecile(Number(e.target.value))}
+                                />
+                                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                                    <span>Selective (10%)</span>
+                                    <span>All In (100%)</span>
                                 </div>
                             </div>
 
-                            {/* Detailed Table (Replaces Volume Chart) */}
-                            <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
-                                <div className="p-6 border-b">
-                                    <h3 className="font-semibold">Decile Performance</h3>
+                            <div className="pt-4 border-t space-y-4">
+                                <div>
+                                    <h4 className="text-xs uppercase text-muted-foreground font-semibold">Recommended Cutoff</h4>
+                                    <p className="text-2xl font-bold font-mono">
+                                        {(analysis?.stats?.cutoff || 0).toFixed(4)}
+                                    </p>
                                 </div>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                        <thead className="bg-muted/50">
-                                            <tr className="border-b">
-                                                <th className="h-10 px-4 text-left font-medium text-muted-foreground w-[80px]">Decile</th>
-                                                <th className="h-10 px-4 text-right font-medium text-muted-foreground">Originations</th>
-                                                <th className="h-10 px-4 text-right font-medium text-muted-foreground">Charge Offs</th>
-                                                <th className="h-10 px-4 text-right font-medium text-muted-foreground">Rate %</th>
-                                                <th className="h-10 px-4 text-right font-medium text-muted-foreground bg-muted/30 border-l">Cum. Orig.</th>
-                                                <th className="h-10 px-4 text-right font-medium text-muted-foreground bg-muted/30">Cum. C/O</th>
-                                                <th className="h-10 px-4 text-right font-medium text-muted-foreground bg-muted/30">Cum. Rate %</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {analysis.data.map((row) => (
-                                                <tr
-                                                    key={row.decile}
-                                                    className={cn(
-                                                        "border-b last:border-0 transition-colors hover:bg-muted/50",
-                                                        row.decile <= cutoffDecile ? "bg-green-50/50" : ""
-                                                    )}
-                                                >
-                                                    <td className="p-4 font-medium">{row.decile}</td>
-                                                    <td className="p-4 text-right">{row.volume.toLocaleString()}</td>
-                                                    <td className="p-4 text-right text-red-600">{Math.round(row.chargeOffs).toLocaleString()}</td>
-                                                    <td className="p-4 text-right font-semibold">{row.risk.toFixed(2)}%</td>
-
-                                                    <td className="p-4 text-right text-muted-foreground bg-muted/10 border-l">{row.cumulativeVolume.toLocaleString()}</td>
-                                                    <td className="p-4 text-right text-muted-foreground bg-muted/10">{Math.round(row.cumulativeChargeOffs).toLocaleString()}</td>
-                                                    <td className={cn(
-                                                        "p-4 text-right font-bold bg-muted/10",
-                                                        // If cumulative loss is > tolerance?? No, tolerance is distinct.
-                                                        // Just showing visual.
-                                                        "text-foreground"
-                                                    )}>
-                                                        {row.cumulativeLoss.toFixed(2)}%
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            {/* Total Row */}
-                                            <tr className="bg-muted font-bold border-t-2">
-                                                <td className="p-4">TOTAL</td>
-                                                <td className="p-4 text-right">{analysis.totals.count.toLocaleString()}</td>
-                                                <td className="p-4 text-right text-red-600">{Math.round(analysis.totals.chargeOffs).toLocaleString()}</td>
-                                                <td className="p-4 text-right">{analysis.totals.rate.toFixed(2)}%</td>
-                                                <td className="p-4 text-right border-l">-</td>
-                                                <td className="p-4 text-right">-</td>
-                                                <td className="p-4 text-right">-</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <h4 className="text-xs uppercase text-muted-foreground font-semibold">Proj. Approval</h4>
+                                        <p className="text-lg font-bold text-green-600">
+                                            {((analysis?.stats?.approvalRate || 0) * 100).toFixed(1)}%
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <h4 className="text-xs uppercase text-muted-foreground font-semibold">Proj. Loss</h4>
+                                        <p className="text-lg font-bold text-red-600">
+                                            {((analysis?.stats?.lossRate || 0) * 100).toFixed(2)}%
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
 
-                        </div>
+                            <div className="pt-4 border-t">
+                                <label className="text-sm font-medium mb-1 block">Policy Name</label>
+                                <input
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm mb-4"
+                                    value={policyName}
+                                    onChange={(e) => setPolicyName(e.target.value)}
+                                />
+
+                                <button
+                                    onClick={() => activateMutation.mutate()}
+                                    disabled={activateMutation.isPending}
+                                    className={cn(
+                                        "w-full inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors h-10 px-4 py-2",
+                                        activationSuccess
+                                            ? "bg-green-600 text-white hover:bg-green-700"
+                                            : "bg-primary text-primary-foreground hover:bg-primary/90"
+                                    )}
+                                >
+                                    {activateMutation.isPending
+                                        ? "Processing..."
+                                        : activationSuccess
+                                            ? "Success!"
+                                            : system?.active_policy_summary
+                                                ? "Update Policy"
+                                                : "Activate Policy"
+                                    }
+                                    {activationSuccess && <Check className="ml-2 h-4 w-4" />}
+                                </button>
+                            </div>
+                        </>
                     )}
                 </div>
-
             </div>
 
-            {/* Policy History Section */}
-            <div className="bg-card border rounded-xl shadow-sm overflow-hidden mt-8">
-                <div className="px-6 py-4 border-b">
-                    <h3 className="font-semibold text-lg">Policy History</h3>
-                </div>
-                <PolicyList systemId={systemId} />
+            {/* Charts & Tables */}
+            <div className="lg:col-span-2 space-y-6">
+                {!selectedModel ? (
+                    <div className="bg-card border rounded-xl p-12 flex flex-col items-center justify-center text-muted-foreground h-full min-h-[400px]">
+                        <Scale className="h-12 w-12 mb-4 opacity-20" />
+                        <p>Select a model to analyze impact.</p>
+                    </div>
+                ) : !analysis ? (
+                    <div className="bg-card border rounded-xl p-12 flex flex-col items-center justify-center text-muted-foreground">
+                        <AlertTriangle className="h-12 w-12 mb-4 opacity-50 text-yellow-500" />
+                        <p>No calibration data available for this model.</p>
+                        <p className="text-sm mt-2">Try training a new model to generate metrics.</p>
+                    </div>
+                ) : (
+                    <div className="space-y-6">
+                        {/* Risk Chart */}
+                        <div className="bg-card border rounded-xl p-6 shadow-sm">
+                            <h3 className="font-semibold mb-6">Risk by Decile</h3>
+                            <div className="h-[300px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={analysis.data} barCategoryGap="10%">
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                        {/* Use number axis to allow continuous background areas */}
+                                        <XAxis
+                                            dataKey="decile"
+                                            type="number"
+                                            domain={[0.5, 10.5]}
+                                            ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+                                            label={{ value: 'Risk Decile (Low -> High)', position: 'insideBottom', offset: -5 }}
+                                        />
+                                        <YAxis label={{ value: 'Risk %', angle: -90, position: 'insideLeft' }} />
+                                        <Tooltip cursor={{ fill: 'transparent' }} />
+                                        <Legend />
+
+                                        {cutoffDecile > 0 && (
+                                            <ReferenceArea x1={0.5} x2={cutoffDecile + 0.5} y1={0} fill="green" fillOpacity={0.1} />
+                                        )}
+                                        {/* If we select 10 (100%), no red area. 
+                                            If we select 9, red is 9.5 to 10.5 
+                                        */}
+                                        {cutoffDecile < 10 && (
+                                            <ReferenceArea x1={cutoffDecile + 0.5} x2={10.5} y1={0} fill="red" fillOpacity={0.1} />
+                                        )}
+
+                                        <Bar dataKey="risk" fill="#8884d8" name="Decile Risk %" />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        {/* Detailed Table (Replaces Volume Chart) */}
+                        <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
+                            <div className="p-6 border-b">
+                                <h3 className="font-semibold">Decile Performance</h3>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-muted/50">
+                                        <tr className="border-b">
+                                            <th className="h-10 px-4 text-left font-medium text-muted-foreground w-[80px]">Decile</th>
+                                            <th className="h-10 px-4 text-right font-medium text-muted-foreground">Originations</th>
+                                            <th className="h-10 px-4 text-right font-medium text-muted-foreground">Charge Offs</th>
+                                            <th className="h-10 px-4 text-right font-medium text-muted-foreground">Rate %</th>
+                                            <th className="h-10 px-4 text-right font-medium text-muted-foreground bg-muted/30 border-l">Cum. Orig.</th>
+                                            <th className="h-10 px-4 text-right font-medium text-muted-foreground bg-muted/30">Cum. C/O</th>
+                                            <th className="h-10 px-4 text-right font-medium text-muted-foreground bg-muted/30">Cum. Rate %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {analysis.data.map((row) => (
+                                            <tr
+                                                key={row.decile}
+                                                className={cn(
+                                                    "border-b last:border-0 transition-colors hover:bg-muted/50",
+                                                    row.decile <= cutoffDecile ? "bg-green-50/50" : ""
+                                                )}
+                                            >
+                                                <td className="p-4 font-medium">{row.decile}</td>
+                                                <td className="p-4 text-right">{row.volume.toLocaleString()}</td>
+                                                <td className="p-4 text-right text-red-600">{Math.round(row.chargeOffs).toLocaleString()}</td>
+                                                <td className="p-4 text-right font-semibold">{row.risk.toFixed(2)}%</td>
+
+                                                <td className="p-4 text-right text-muted-foreground bg-muted/10 border-l">{row.cumulativeVolume.toLocaleString()}</td>
+                                                <td className="p-4 text-right text-muted-foreground bg-muted/10">{Math.round(row.cumulativeChargeOffs).toLocaleString()}</td>
+                                                <td className={cn(
+                                                    "p-4 text-right font-bold bg-muted/10",
+                                                    // If cumulative loss is > tolerance?? No, tolerance is distinct.
+                                                    // Just showing visual.
+                                                    "text-foreground"
+                                                )}>
+                                                    {row.cumulativeLoss.toFixed(2)}%
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {/* Total Row */}
+                                        <tr className="bg-muted font-bold border-t-2">
+                                            <td className="p-4">TOTAL</td>
+                                            <td className="p-4 text-right">{analysis.totals.count.toLocaleString()}</td>
+                                            <td className="p-4 text-right text-red-600">{Math.round(analysis.totals.chargeOffs).toLocaleString()}</td>
+                                            <td className="p-4 text-right">{analysis.totals.rate.toFixed(2)}%</td>
+                                            <td className="p-4 text-right border-l">-</td>
+                                            <td className="p-4 text-right">-</td>
+                                            <td className="p-4 text-right">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                    </div>
+                )}
             </div>
 
         </div>
+
+        </div >
     );
 }
 
