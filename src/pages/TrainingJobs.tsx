@@ -26,6 +26,9 @@ export default function TrainingJobs() {
     // Safety timer ref
     const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // Snapshot of model count before training starts
+    const initialModelCountRef = useRef<number>(0);
+
     // Fetch Datasets
     const { data: datasets } = useQuery<Dataset[]>({
         queryKey: ["datasets", systemId],
@@ -62,13 +65,23 @@ export default function TrainingJobs() {
     useEffect(() => {
         if (!models) return;
 
+        const currentCount = models.length;
+        const initialCount = initialModelCountRef.current;
+        const hasNewModels = currentCount > initialCount;
         const hasTrainingModels = models.some(m => m.status === "TRAINING");
 
         if (trainingState === 'STARTING') {
-            if (hasTrainingModels) {
-                // Transition to POLLING once we confirm backend has created the jobs
-                setTrainingState('POLLING');
-                // Clear safety timer if it exists
+            // We only transition if we see a NEW model appear.
+            if (hasNewModels) {
+                // Determine if the new model is already done or still training
+                if (hasTrainingModels) {
+                    setTrainingState('POLLING');
+                } else {
+                    // It finished instantly!
+                    setTrainingState('COMPLETED');
+                }
+
+                // Clear safety timer as we have success
                 if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
             }
         } else if (trainingState === 'POLLING') {
@@ -92,6 +105,9 @@ export default function TrainingJobs() {
             await api.post(`/models/${datasetId}/train`, payload);
         },
         onSuccess: () => {
+            // Snapshot the current model count BEFORE invalidating or fetching new ones
+            initialModelCountRef.current = models?.length || 0;
+
             queryClient.invalidateQueries({ queryKey: ["models"] });
             setError(null);
             setWizardStep(0); // Reset wizard
