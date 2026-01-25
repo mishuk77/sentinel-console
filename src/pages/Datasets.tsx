@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dataset } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Loader2, FileText, Upload, AlertCircle, Trash2, Play } from "lucide-react";
+import { Loader2, FileText, Upload, AlertCircle, Trash2, Play, ChevronDown, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Datasets() {
@@ -11,6 +11,9 @@ export default function Datasets() {
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const [uploadError, setUploadError] = useState<string | null>(null);
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [labelColumn, setLabelColumn] = useState<string>("");
+    const [pendingFile, setPendingFile] = useState<File | null>(null);
 
     // Fetch Datasets
     const { data: datasets, isLoading } = useQuery<Dataset[]>({
@@ -29,6 +32,10 @@ export default function Datasets() {
             const formData = new FormData();
             formData.append("file", file);
             formData.append("system_id", systemId);
+            // Include label_column if specified
+            if (labelColumn.trim()) {
+                formData.append("label_column", labelColumn.trim());
+            }
             await api.post("/datasets/upload", formData, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
@@ -36,10 +43,20 @@ export default function Datasets() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["datasets"] });
             setUploadError(null);
+            setPendingFile(null);
+            setLabelColumn("");
+            setShowAdvanced(false);
         },
-        onError: (err) => {
+        onError: (err: any) => {
             console.error(err);
-            setUploadError("Failed to upload dataset. Ensure it is a valid CSV.");
+            const detail = err?.response?.data?.detail;
+            if (detail) {
+                setUploadError(detail);
+            } else if (err?.message) {
+                setUploadError(`Upload failed: ${err.message}`);
+            } else {
+                setUploadError("Failed to upload dataset. Ensure it is a valid CSV with proper formatting.");
+            }
         },
     });
 
@@ -59,7 +76,20 @@ export default function Datasets() {
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            uploadMutation.mutate(e.target.files[0]);
+            const file = e.target.files[0];
+            if (showAdvanced) {
+                // Store file, wait for user to configure and click upload
+                setPendingFile(file);
+            } else {
+                // Direct upload
+                uploadMutation.mutate(file);
+            }
+        }
+    };
+
+    const handleUploadWithOptions = () => {
+        if (pendingFile) {
+            uploadMutation.mutate(pendingFile);
         }
     };
 
@@ -101,12 +131,67 @@ export default function Datasets() {
                     </div>
                 ) : (
                     <div className="bg-card border rounded-xl p-8 shadow-sm">
-                        <div className="flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg p-12 transition-colors hover:bg-accent/50">
+                        <div className="flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 transition-colors hover:bg-accent/50">
                             <Upload className="h-10 w-10 text-muted-foreground mb-4" />
                             <h3 className="text-lg font-semibold text-foreground">Upload CSV Dataset</h3>
-                            <p className="text-sm text-muted-foreground mb-6 text-center max-w-sm">
-                                Drag and drop your file here, or click to browse. Expected columns: <code>loan_amnt</code>, <code>fico</code>, <code>income</code>, <code>charge_off</code>.
+                            <p className="text-sm text-muted-foreground mb-4 text-center max-w-sm">
+                                Upload your historical credit data. The system will auto-detect the target column.
                             </p>
+
+                            {/* Advanced Options Toggle */}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowAdvanced(!showAdvanced);
+                                    if (!showAdvanced) setPendingFile(null);
+                                }}
+                                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mb-4"
+                            >
+                                <Settings2 className="h-3.5 w-3.5" />
+                                Advanced Options
+                                <ChevronDown className={cn(
+                                    "h-3.5 w-3.5 transition-transform",
+                                    showAdvanced && "rotate-180"
+                                )} />
+                            </button>
+
+                            {/* Advanced Options Panel */}
+                            {showAdvanced && (
+                                <div className="w-full max-w-sm mb-4 p-4 bg-muted/30 rounded-lg border space-y-3 animate-in fade-in slide-in-from-top-2">
+                                    <div>
+                                        <label className="text-xs font-medium text-foreground block mb-1">
+                                            Target Column (Label)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            placeholder="e.g., charged_off, default, bad_flag"
+                                            className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                                            value={labelColumn}
+                                            onChange={(e) => setLabelColumn(e.target.value)}
+                                        />
+                                        <p className="text-[10px] text-muted-foreground mt-1">
+                                            Leave blank for auto-detection
+                                        </p>
+                                    </div>
+
+                                    {pendingFile && (
+                                        <div className="flex items-center justify-between p-2 bg-background rounded border">
+                                            <div className="flex items-center gap-2 text-sm">
+                                                <FileText className="h-4 w-4 text-blue-600" />
+                                                <span className="truncate max-w-[180px]">{pendingFile.name}</span>
+                                            </div>
+                                            <button
+                                                onClick={handleUploadWithOptions}
+                                                disabled={uploadMutation.isPending}
+                                                className="text-xs bg-primary text-primary-foreground px-3 py-1 rounded hover:bg-primary/90 transition-colors"
+                                            >
+                                                {uploadMutation.isPending ? "Uploading..." : "Upload"}
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             <label className="cursor-pointer">
                                 <input
                                     type="file"
@@ -120,13 +205,13 @@ export default function Datasets() {
                                     "bg-primary text-primary-foreground shadow hover:bg-primary/90",
                                     "h-10 px-8 py-2"
                                 )}>
-                                    {uploadMutation.isPending ? "Uploading..." : "Select File"}
+                                    {uploadMutation.isPending ? "Uploading..." : showAdvanced && pendingFile ? "Change File" : "Select File"}
                                 </span>
                             </label>
                             {uploadError && (
-                                <div className="mt-4 flex items-center text-destructive text-sm bg-destructive/10 p-2 rounded">
-                                    <AlertCircle className="w-4 h-4 mr-2" />
-                                    {uploadError}
+                                <div className="mt-4 flex items-center text-destructive text-sm bg-destructive/10 p-3 rounded max-w-sm">
+                                    <AlertCircle className="w-4 h-4 mr-2 shrink-0" />
+                                    <span>{uploadError}</span>
                                 </div>
                             )}
                         </div>

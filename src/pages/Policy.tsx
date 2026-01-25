@@ -4,7 +4,7 @@ import { useSearchParams, useParams } from "react-router-dom";
 import { useSystem } from "@/lib/hooks";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Scale, Check, AlertTriangle, Trash2 } from "lucide-react";
+import { Scale, Check, AlertTriangle, Trash2, AlertCircle, X, DollarSign, Sparkles, RefreshCw } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +28,14 @@ export default function Policy() {
     const [targetDecile, setTargetDecile] = useState(10); // Default to 10 (100% population)
     const [policyName, setPolicyName] = useState("Proactive Risk Policy");
     const [activationSuccess, setActivationSuccess] = useState(false);
+
+    // Loan Amount Module state
+    const [enableAmountLadder, setEnableAmountLadder] = useState(false);
+    const [amountLadder, setAmountLadder] = useState<Record<string, number>>({
+        "1": 50000, "2": 45000, "3": 40000, "4": 35000, "5": 30000,
+        "6": 25000, "7": 20000, "8": 15000, "9": 10000, "10": 5000
+    });
+    const [isGeneratingAmounts, setIsGeneratingAmounts] = useState(false);
 
     // Fetch Models
     const { data: models } = useQuery<MLModel[]>({
@@ -151,18 +159,54 @@ export default function Policy() {
         }
     }, [models, initialModelId, system]);
 
+    // Generate Amount Recommendations
+    const generateAmountRecommendations = async () => {
+        if (!selectedModel) return;
+        setIsGeneratingAmounts(true);
+        try {
+            const res = await api.post("/policies/recommend-amounts", {
+                model_id: selectedModel.id,
+                decision_system_id: systemId
+            });
+            if (res.data?.amount_ladder) {
+                setAmountLadder(res.data.amount_ladder);
+            }
+        } catch (err) {
+            console.error("Failed to generate amount recommendations:", err);
+            // Keep existing defaults on error
+        } finally {
+            setIsGeneratingAmounts(false);
+        }
+    };
+
+    // Update individual amount in ladder
+    const updateAmount = (decile: string, amount: number) => {
+        setAmountLadder(prev => ({
+            ...prev,
+            [decile]: Math.max(0, amount)
+        }));
+    };
+
     // Activate Mutation
     const activateMutation = useMutation({
         mutationFn: async () => {
             if (!selectedModel) return;
-            // 1. Create Policy
-            const res = await api.post("/policies/", {
+            // 1. Create Policy with optional amount ladder
+            const policyPayload: any = {
                 model_id: selectedModel.id,
+                decision_system_id: systemId,
                 threshold: analysis?.stats?.cutoff || 0.5,
                 projected_approval_rate: analysis?.stats?.approvalRate || 0,
                 projected_loss_rate: analysis?.stats?.lossRate || 0,
                 target_decile: targetDecile
-            });
+            };
+
+            // Include amount ladder if enabled
+            if (enableAmountLadder) {
+                policyPayload.amount_ladder = amountLadder;
+            }
+
+            const res = await api.post("/policies/", policyPayload);
             const policyId = res.data.id;
 
             // 2. Activate
@@ -265,6 +309,96 @@ export default function Policy() {
                                         </p>
                                     </div>
                                 </div>
+                            </div>
+
+                            {/* Loan Amount Module */}
+                            <div className="pt-4 border-t">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                                        <label className="text-sm font-medium">Exposure Control</label>
+                                    </div>
+                                    <button
+                                        onClick={() => setEnableAmountLadder(!enableAmountLadder)}
+                                        className={cn(
+                                            "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+                                            enableAmountLadder ? "bg-primary" : "bg-muted"
+                                        )}
+                                    >
+                                        <span
+                                            className={cn(
+                                                "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition-transform",
+                                                enableAmountLadder ? "translate-x-4" : "translate-x-0"
+                                            )}
+                                        />
+                                    </button>
+                                </div>
+
+                                {enableAmountLadder && (
+                                    <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                                        <p className="text-xs text-muted-foreground">
+                                            Set maximum loan amounts by risk decile. Lower deciles = lower risk = higher limits.
+                                        </p>
+
+                                        <button
+                                            onClick={generateAmountRecommendations}
+                                            disabled={isGeneratingAmounts}
+                                            className="w-full inline-flex items-center justify-center gap-2 rounded-md text-xs font-medium h-8 px-3 border border-primary/30 text-primary hover:bg-primary/5 transition-colors"
+                                        >
+                                            {isGeneratingAmounts ? (
+                                                <RefreshCw className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                                <Sparkles className="h-3 w-3" />
+                                            )}
+                                            {isGeneratingAmounts ? "Generating..." : "Auto-Generate Limits"}
+                                        </button>
+
+                                        <div className="bg-muted/30 rounded-lg p-3 space-y-2 max-h-[280px] overflow-y-auto">
+                                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(decile => (
+                                                <div key={decile} className="flex items-center gap-2">
+                                                    <span className={cn(
+                                                        "text-xs font-mono w-6 text-center rounded py-0.5",
+                                                        decile <= 3 ? "bg-green-100 text-green-800" :
+                                                            decile <= 7 ? "bg-yellow-100 text-yellow-800" :
+                                                                "bg-red-100 text-red-800"
+                                                    )}>
+                                                        D{decile}
+                                                    </span>
+                                                    <div className="flex-1 flex items-center gap-1">
+                                                        <span className="text-muted-foreground text-xs">$</span>
+                                                        <input
+                                                            type="number"
+                                                            className="flex-1 h-7 rounded border border-input bg-background px-2 text-xs font-mono"
+                                                            value={amountLadder[String(decile)] || 0}
+                                                            onChange={(e) => updateAmount(String(decile), Number(e.target.value))}
+                                                            step={1000}
+                                                            min={0}
+                                                        />
+                                                    </div>
+                                                    <div
+                                                        className="w-16 h-2 bg-muted rounded-full overflow-hidden"
+                                                        title={`$${(amountLadder[String(decile)] || 0).toLocaleString()}`}
+                                                    >
+                                                        <div
+                                                            className={cn(
+                                                                "h-full transition-all",
+                                                                decile <= 3 ? "bg-green-500" :
+                                                                    decile <= 7 ? "bg-yellow-500" :
+                                                                        "bg-red-500"
+                                                            )}
+                                                            style={{
+                                                                width: `${Math.min(100, ((amountLadder[String(decile)] || 0) / 50000) * 100)}%`
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <p className="text-[10px] text-muted-foreground text-center">
+                                            Amounts should be monotonically decreasing (D1 &gt; D10)
+                                        </p>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="pt-4 border-t">
@@ -428,6 +562,8 @@ export default function Policy() {
 
 function PolicyList({ systemId }: { systemId?: string }) {
     const queryClient = useQueryClient();
+    const [deleteError, setDeleteError] = useState<string | null>(null);
+
     const { data: policies } = useQuery<any[]>({
         queryKey: ["policies", systemId],
         queryFn: async () => {
@@ -444,10 +580,12 @@ function PolicyList({ systemId }: { systemId?: string }) {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["policies"] });
+            setDeleteError(null);
         },
         onError: (err: any) => {
-            const msg = err.response?.data?.detail || "Failed to delete policy.";
-            alert(msg);
+            const msg = err.response?.data?.detail || "Failed to delete policy. Active policies cannot be deleted.";
+            setDeleteError(msg);
+            setTimeout(() => setDeleteError(null), 5000);
         }
     });
 
@@ -455,6 +593,19 @@ function PolicyList({ systemId }: { systemId?: string }) {
 
     return (
         <div className="overflow-x-auto">
+            {/* Error Banner */}
+            {deleteError && (
+                <div className="mx-6 mt-4 bg-destructive/10 border border-destructive/20 rounded-lg p-3 flex items-center gap-3 animate-in fade-in">
+                    <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+                    <p className="text-sm text-destructive flex-1">{deleteError}</p>
+                    <button
+                        onClick={() => setDeleteError(null)}
+                        className="text-destructive hover:text-destructive/80 transition-colors"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+            )}
             <table className="w-full text-sm text-left">
                 <thead className="bg-muted/50 text-muted-foreground uppercase font-medium">
                     <tr>

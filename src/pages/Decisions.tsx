@@ -1,15 +1,25 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Search, Calculator, Check, X } from "lucide-react";
+import { Search, Calculator, Check, X, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, AlertCircle, Eye, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+interface ReasonCode {
+    feature: string;
+    impact: number;
+    direction: "positive" | "negative";
+}
 
 interface DecisionRecord {
     id: string;
     applicant_name: string;
     decision: "APPROVE" | "DECLINE";
     score: number;
-    reason_codes: Record<string, any>;
+    metric_decile: number;
+    allowed_amount: number;
+    approved_amount: number;
+    reason_codes: ReasonCode[];
+    input_payload: Record<string, any>;
     created_at: string;
     decision_system_id: string;
 }
@@ -19,10 +29,14 @@ interface DecisionSystem {
     name: string;
 }
 
+const PAGE_SIZE = 20;
+
 export default function Decisions() {
     const queryClient = useQueryClient();
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedSystemId, setSelectedSystemId] = useState<string>("");
+    const [currentPage, setCurrentPage] = useState(1);
+    const [selectedDecision, setSelectedDecision] = useState<DecisionRecord | null>(null);
 
     // Fetch Systems
     const { data: systems } = useQuery<DecisionSystem[]>({
@@ -46,20 +60,35 @@ export default function Decisions() {
         loan_amnt: 15000
     });
 
-    // Fetch History (Global or filtered? Global for now, but maybe filter if system selected? 
-    // Let's keep it global search, but maybe allow filtering by system dropdown if user wants?
-    // User requirement: "searchable across all Decision Systems".  So defaulting to all is fine.
-    // I'll add an optional filter in query if I wanted, but for now just global list is fine.
-    const { data: decisions, isLoading } = useQuery<DecisionRecord[]>({
-        queryKey: ["decisions", searchTerm], // Include systemId if we filtered
+    // Fetch History with pagination
+    const { data: decisionsData, isLoading } = useQuery<{ decisions: DecisionRecord[]; total: number }>({
+        queryKey: ["decisions", searchTerm, currentPage],
         queryFn: async () => {
-            const params: any = {};
+            const params: any = {
+                skip: (currentPage - 1) * PAGE_SIZE,
+                limit: PAGE_SIZE
+            };
             if (searchTerm) params.applicant_name = searchTerm;
             const res = await api.get("/decisions/", { params });
-            return res.data;
+            // Backend may return array directly or with total - handle both
+            const data = res.data;
+            if (Array.isArray(data)) {
+                return { decisions: data, total: data.length };
+            }
+            return { decisions: data.items || data, total: data.total || data.length };
         },
         refetchInterval: 5000
     });
+
+    const decisions = decisionsData?.decisions;
+    const totalDecisions = decisionsData?.total || 0;
+    const totalPages = Math.ceil(totalDecisions / PAGE_SIZE);
+
+    // Reset to page 1 when search changes
+    const handleSearch = (term: string) => {
+        setSearchTerm(term);
+        setCurrentPage(1);
+    };
 
     // Make Decision Mutation
     const decisionMutation = useMutation({
@@ -107,19 +136,6 @@ export default function Decisions() {
                         </h3>
 
                         <div className="space-y-4">
-                            <div>
-                                <label className="text-sm font-medium">Decision System</label>
-                                <select
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1"
-                                    value={selectedSystemId}
-                                    onChange={(e) => setSelectedSystemId(e.target.value)}
-                                >
-                                    <option value="" disabled>Select a system...</option>
-                                    {systems?.map(s => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
-                            </div>
                             <div>
                                 <label className="text-sm font-medium">Decision System</label>
                                 <select
@@ -185,7 +201,14 @@ export default function Decisions() {
                             </button>
 
                             {decisionMutation.isError && (
-                                <p className="text-destructive text-sm mt-2">Error running decision.</p>
+                                <div className="mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg flex items-start gap-2">
+                                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                                    <div className="text-sm text-destructive">
+                                        {(decisionMutation.error as any)?.response?.data?.detail
+                                            || (decisionMutation.error as Error)?.message
+                                            || "Failed to run decision. Please check the system has an active model and policy."}
+                                    </div>
+                                </div>
                             )}
                         </div>
                     </div>
@@ -207,19 +230,66 @@ export default function Decisions() {
                                 </span>
                             </div>
 
-                            <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                    <span>Risk Score:</span>
-                                    <span className="font-mono font-bold">{(lastResult.score * 100).toFixed(1)}</span>
+                            <div className="space-y-3 text-sm">
+                                {/* Core Metrics */}
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="bg-white/50 rounded-lg p-3">
+                                        <div className="text-xs text-muted-foreground uppercase">Risk Score</div>
+                                        <div className="font-mono font-bold text-lg">{(lastResult.score * 100).toFixed(1)}</div>
+                                    </div>
+                                    <div className="bg-white/50 rounded-lg p-3">
+                                        <div className="text-xs text-muted-foreground uppercase">Risk Decile</div>
+                                        <div className="font-mono font-bold text-lg">{lastResult.metric_decile || "-"}</div>
+                                    </div>
                                 </div>
-                                {Object.entries(lastResult.reason_codes || {}).map(([key, val]: any) => (
-                                    key !== 'score' && key !== 'cutoff' && (
-                                        <div key={key} className="flex justify-between text-xs text-muted-foreground">
-                                            <span className="capitalize">{key.replace("_", " ")}:</span>
-                                            <span>{typeof val === 'number' ? val.toFixed(2) : val}</span>
+
+                                {/* Amount Info (if available) */}
+                                {(lastResult.allowed_amount || lastResult.approved_amount) && (
+                                    <div className="border-t pt-3 mt-3">
+                                        <div className="text-xs text-muted-foreground uppercase mb-2">Amount Decision</div>
+                                        <div className="grid grid-cols-2 gap-3 text-xs">
+                                            {lastResult.allowed_amount && (
+                                                <div>
+                                                    <span className="text-muted-foreground">Max Allowed:</span>
+                                                    <span className="font-mono font-bold ml-2">${lastResult.allowed_amount.toLocaleString()}</span>
+                                                </div>
+                                            )}
+                                            {lastResult.approved_amount && (
+                                                <div>
+                                                    <span className="text-muted-foreground">Approved:</span>
+                                                    <span className="font-mono font-bold ml-2 text-green-700">${lastResult.approved_amount.toLocaleString()}</span>
+                                                </div>
+                                            )}
                                         </div>
-                                    )
-                                ))}
+                                    </div>
+                                )}
+
+                                {/* Reason Codes */}
+                                {lastResult.reason_codes && lastResult.reason_codes.length > 0 && (
+                                    <div className="border-t pt-3 mt-3">
+                                        <div className="text-xs text-muted-foreground uppercase mb-2">Key Factors</div>
+                                        <div className="space-y-1.5">
+                                            {lastResult.reason_codes.slice(0, 5).map((rc: ReasonCode, idx: number) => (
+                                                <div key={idx} className="flex items-center justify-between text-xs bg-white/50 rounded px-2 py-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        {rc.direction === "positive" ? (
+                                                            <TrendingUp className="w-3.5 h-3.5 text-green-600" />
+                                                        ) : (
+                                                            <TrendingDown className="w-3.5 h-3.5 text-red-600" />
+                                                        )}
+                                                        <span className="capitalize">{rc.feature.replace(/_/g, " ")}</span>
+                                                    </div>
+                                                    <span className={cn(
+                                                        "font-mono font-semibold",
+                                                        rc.direction === "positive" ? "text-green-700" : "text-red-700"
+                                                    )}>
+                                                        {rc.direction === "positive" ? "+" : ""}{(rc.impact * 100).toFixed(1)}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -235,7 +305,7 @@ export default function Decisions() {
                                 placeholder="Search by name..."
                                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm pl-9"
                                 value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
+                                onChange={(e) => handleSearch(e.target.value)}
                             />
                         </div>
                     </div>
@@ -253,11 +323,15 @@ export default function Decisions() {
                             </thead>
                             <tbody className="divide-y">
                                 {isLoading ? (
-                                    <tr><td colSpan={4} className="p-8 text-center">Loading...</td></tr>
+                                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Loading decisions...</td></tr>
                                 ) : decisions?.length === 0 ? (
-                                    <tr><td colSpan={4} className="p-8 text-center">No decisions found.</td></tr>
+                                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No decisions found.</td></tr>
                                 ) : decisions?.map((d) => (
-                                    <tr key={d.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
+                                    <tr
+                                        key={d.id}
+                                        className="hover:bg-muted/50 transition-colors cursor-pointer group"
+                                        onClick={() => setSelectedDecision(d)}
+                                    >
                                         <td className="px-6 py-4 text-xs font-mono text-muted-foreground">
                                             {systems?.find(s => s.id === d.decision_system_id)?.name || d.decision_system_id?.slice(0, 8) || "N/A"}
                                         </td>
@@ -273,17 +347,264 @@ export default function Decisions() {
                                         <td className="px-6 py-4 font-mono">
                                             {(d.score * 100).toFixed(1)}
                                         </td>
-                                        <td className="px-6 py-4 text-muted-foreground">
-                                            {new Date(d.created_at).toLocaleString()}
+                                        <td className="px-6 py-4 text-muted-foreground flex items-center justify-between">
+                                            <span>{new Date(d.created_at).toLocaleString()}</span>
+                                            <Eye className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" />
                                         </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
+
+                        {/* Pagination Controls */}
+                        {totalPages > 1 && (
+                            <div className="flex items-center justify-between px-6 py-4 border-t bg-muted/30">
+                                <div className="text-sm text-muted-foreground">
+                                    Showing {((currentPage - 1) * PAGE_SIZE) + 1} - {Math.min(currentPage * PAGE_SIZE, totalDecisions)} of {totalDecisions} decisions
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                        className={cn(
+                                            "inline-flex items-center justify-center h-8 w-8 rounded-md border text-sm font-medium transition-colors",
+                                            currentPage === 1
+                                                ? "opacity-50 cursor-not-allowed bg-muted"
+                                                : "hover:bg-accent hover:text-accent-foreground"
+                                        )}
+                                    >
+                                        <ChevronLeft className="h-4 w-4" />
+                                    </button>
+                                    <div className="flex items-center gap-1">
+                                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                            let pageNum: number;
+                                            if (totalPages <= 5) {
+                                                pageNum = i + 1;
+                                            } else if (currentPage <= 3) {
+                                                pageNum = i + 1;
+                                            } else if (currentPage >= totalPages - 2) {
+                                                pageNum = totalPages - 4 + i;
+                                            } else {
+                                                pageNum = currentPage - 2 + i;
+                                            }
+                                            return (
+                                                <button
+                                                    key={pageNum}
+                                                    onClick={() => setCurrentPage(pageNum)}
+                                                    className={cn(
+                                                        "inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors",
+                                                        currentPage === pageNum
+                                                            ? "bg-primary text-primary-foreground"
+                                                            : "hover:bg-accent hover:text-accent-foreground"
+                                                    )}
+                                                >
+                                                    {pageNum}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <button
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className={cn(
+                                            "inline-flex items-center justify-center h-8 w-8 rounded-md border text-sm font-medium transition-colors",
+                                            currentPage === totalPages
+                                                ? "opacity-50 cursor-not-allowed bg-muted"
+                                                : "hover:bg-accent hover:text-accent-foreground"
+                                        )}
+                                    >
+                                        <ChevronRight className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
             </div>
+
+            {/* Decision Detail Modal */}
+            {selectedDecision && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+                    onClick={() => setSelectedDecision(null)}
+                >
+                    <div
+                        className="bg-background rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Modal Header */}
+                        <div className={cn(
+                            "flex items-center justify-between p-6 border-b",
+                            selectedDecision.decision === "APPROVE" ? "bg-green-50" : "bg-red-50"
+                        )}>
+                            <div className="flex items-center gap-3">
+                                <div className={cn(
+                                    "p-2 rounded-full",
+                                    selectedDecision.decision === "APPROVE" ? "bg-green-100" : "bg-red-100"
+                                )}>
+                                    {selectedDecision.decision === "APPROVE" ? (
+                                        <Check className="h-5 w-5 text-green-700" />
+                                    ) : (
+                                        <X className="h-5 w-5 text-red-700" />
+                                    )}
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold">Decision Details</h2>
+                                    <p className="text-sm text-muted-foreground">
+                                        {selectedDecision.applicant_name || "Unknown Applicant"}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setSelectedDecision(null)}
+                                className="p-2 hover:bg-muted rounded-full transition-colors"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 space-y-6">
+                            {/* Decision Summary */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                                    <div className="text-xs text-muted-foreground uppercase mb-1">Decision</div>
+                                    <div className={cn(
+                                        "font-bold text-lg",
+                                        selectedDecision.decision === "APPROVE" ? "text-green-700" : "text-red-700"
+                                    )}>
+                                        {selectedDecision.decision}
+                                    </div>
+                                </div>
+                                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                                    <div className="text-xs text-muted-foreground uppercase mb-1">Risk Score</div>
+                                    <div className="font-bold text-lg font-mono">
+                                        {(selectedDecision.score * 100).toFixed(1)}
+                                    </div>
+                                </div>
+                                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                                    <div className="text-xs text-muted-foreground uppercase mb-1">Risk Decile</div>
+                                    <div className="font-bold text-lg font-mono">
+                                        {selectedDecision.metric_decile || "-"}
+                                    </div>
+                                </div>
+                                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                                    <div className="text-xs text-muted-foreground uppercase mb-1">Date</div>
+                                    <div className="font-medium text-sm">
+                                        {new Date(selectedDecision.created_at).toLocaleDateString()}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Amount Info */}
+                            {(selectedDecision.allowed_amount || selectedDecision.approved_amount) && (
+                                <div className="border rounded-lg p-4">
+                                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                                        <FileText className="h-4 w-4" /> Amount Decision
+                                    </h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {selectedDecision.allowed_amount && (
+                                            <div>
+                                                <div className="text-xs text-muted-foreground">Max Allowed Amount</div>
+                                                <div className="text-xl font-bold font-mono">
+                                                    ${selectedDecision.allowed_amount.toLocaleString()}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {selectedDecision.approved_amount && (
+                                            <div>
+                                                <div className="text-xs text-muted-foreground">Approved Amount</div>
+                                                <div className="text-xl font-bold font-mono text-green-700">
+                                                    ${selectedDecision.approved_amount.toLocaleString()}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Reason Codes */}
+                            {selectedDecision.reason_codes && selectedDecision.reason_codes.length > 0 && (
+                                <div className="border rounded-lg p-4">
+                                    <h3 className="text-sm font-semibold mb-3">Key Factors</h3>
+                                    <div className="space-y-2">
+                                        {selectedDecision.reason_codes.map((rc: ReasonCode, idx: number) => (
+                                            <div
+                                                key={idx}
+                                                className={cn(
+                                                    "flex items-center justify-between p-3 rounded-lg",
+                                                    rc.direction === "positive" ? "bg-green-50" : "bg-red-50"
+                                                )}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    {rc.direction === "positive" ? (
+                                                        <TrendingUp className="h-4 w-4 text-green-600" />
+                                                    ) : (
+                                                        <TrendingDown className="h-4 w-4 text-red-600" />
+                                                    )}
+                                                    <span className="font-medium capitalize">
+                                                        {rc.feature.replace(/_/g, " ")}
+                                                    </span>
+                                                </div>
+                                                <span className={cn(
+                                                    "font-mono font-bold",
+                                                    rc.direction === "positive" ? "text-green-700" : "text-red-700"
+                                                )}>
+                                                    {rc.direction === "positive" ? "+" : ""}{(rc.impact * 100).toFixed(2)}%
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Input Payload */}
+                            {selectedDecision.input_payload && Object.keys(selectedDecision.input_payload).length > 0 && (
+                                <div className="border rounded-lg p-4">
+                                    <h3 className="text-sm font-semibold mb-3">Input Data</h3>
+                                    <div className="bg-muted/30 rounded-lg p-4 overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <tbody>
+                                                {Object.entries(selectedDecision.input_payload).map(([key, value]) => (
+                                                    <tr key={key} className="border-b last:border-0">
+                                                        <td className="py-2 pr-4 text-muted-foreground capitalize">
+                                                            {key.replace(/_/g, " ")}
+                                                        </td>
+                                                        <td className="py-2 font-mono font-medium text-right">
+                                                            {typeof value === "number"
+                                                                ? value.toLocaleString()
+                                                                : String(value)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* System & ID Info */}
+                            <div className="text-xs text-muted-foreground border-t pt-4 flex justify-between">
+                                <span>
+                                    System: {systems?.find(s => s.id === selectedDecision.decision_system_id)?.name || selectedDecision.decision_system_id}
+                                </span>
+                                <span className="font-mono">ID: {selectedDecision.id}</span>
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-4 border-t bg-muted/20 flex justify-end">
+                            <button
+                                onClick={() => setSelectedDecision(null)}
+                                className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
