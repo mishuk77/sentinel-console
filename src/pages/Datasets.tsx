@@ -37,9 +37,16 @@ export default function Datasets() {
             queryClient.invalidateQueries({ queryKey: ["datasets"] });
             setUploadError(null);
         },
-        onError: (err) => {
+        onError: (err: any) => {
             console.error(err);
-            setUploadError("Failed to upload dataset. Ensure it is a valid CSV.");
+            const detail = err?.response?.data?.detail;
+            if (detail) {
+                setUploadError(detail);
+            } else if (err?.message) {
+                setUploadError(`Upload failed: ${err.message}`);
+            } else {
+                setUploadError("Failed to upload dataset. Ensure it is a valid CSV with proper formatting.");
+            }
         },
     });
 

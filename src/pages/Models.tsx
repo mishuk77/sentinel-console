@@ -4,7 +4,7 @@ import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Trophy, BarChart2, X, ArrowRight, Trash2 } from "lucide-react";
+import { Trophy, BarChart2, X, ArrowRight, Trash2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 // import { useSystem } from "@/lib/hooks"; // Unused
 
@@ -13,6 +13,7 @@ export default function Models() {
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const [compareModel, setCompareModel] = useState<MLModel | null>(null);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     // Fetch Models
     const { data: models, isLoading } = useQuery<MLModel[]>({
@@ -32,11 +33,14 @@ export default function Models() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["models"] });
             queryClient.invalidateQueries({ queryKey: ["system", systemId] });
+            setErrorMessage(null);
         },
         onError: (err: any) => {
             console.error(err);
-            const msg = err.response?.data?.detail || "Failed to delete model.";
-            alert(msg);
+            const msg = err.response?.data?.detail || "Failed to delete model. It may be in use by an active policy.";
+            setErrorMessage(msg);
+            // Auto-clear error after 5 seconds
+            setTimeout(() => setErrorMessage(null), 5000);
         }
     });
 
@@ -111,6 +115,20 @@ export default function Models() {
                     View trained candidate models and promote them to production policies.
                 </p>
             </div>
+
+            {/* Error Banner */}
+            {errorMessage && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+                    <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+                    <p className="text-sm text-destructive flex-1">{errorMessage}</p>
+                    <button
+                        onClick={() => setErrorMessage(null)}
+                        className="text-destructive hover:text-destructive/80 transition-colors"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+            )}
 
             {/* Models List */}
             <div className="bg-card border rounded-xl shadow-sm overflow-hidden">

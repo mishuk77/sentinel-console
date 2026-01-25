@@ -4,7 +4,7 @@ import { useSearchParams, useParams } from "react-router-dom";
 import { useSystem } from "@/lib/hooks";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Scale, Check, AlertTriangle, Trash2 } from "lucide-react";
+import { Scale, Check, AlertTriangle, Trash2, AlertCircle, X } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -428,6 +428,8 @@ export default function Policy() {
 
 function PolicyList({ systemId }: { systemId?: string }) {
     const queryClient = useQueryClient();
+    const [deleteError, setDeleteError] = useState<string | null>(null);
+
     const { data: policies } = useQuery<any[]>({
         queryKey: ["policies", systemId],
         queryFn: async () => {
@@ -444,10 +446,12 @@ function PolicyList({ systemId }: { systemId?: string }) {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["policies"] });
+            setDeleteError(null);
         },
         onError: (err: any) => {
-            const msg = err.response?.data?.detail || "Failed to delete policy.";
-            alert(msg);
+            const msg = err.response?.data?.detail || "Failed to delete policy. Active policies cannot be deleted.";
+            setDeleteError(msg);
+            setTimeout(() => setDeleteError(null), 5000);
         }
     });
 
@@ -455,6 +459,19 @@ function PolicyList({ systemId }: { systemId?: string }) {
 
     return (
         <div className="overflow-x-auto">
+            {/* Error Banner */}
+            {deleteError && (
+                <div className="mx-6 mt-4 bg-destructive/10 border border-destructive/20 rounded-lg p-3 flex items-center gap-3 animate-in fade-in">
+                    <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+                    <p className="text-sm text-destructive flex-1">{deleteError}</p>
+                    <button
+                        onClick={() => setDeleteError(null)}
+                        className="text-destructive hover:text-destructive/80 transition-colors"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+            )}
             <table className="w-full text-sm text-left">
                 <thead className="bg-muted/50 text-muted-foreground uppercase font-medium">
                     <tr>
