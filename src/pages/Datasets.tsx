@@ -75,71 +75,61 @@ export default function Datasets() {
                 </div>
             </div>
 
-            {/* Upload Area */}
-            <div className="bg-card border rounded-xl p-8 shadow-sm">
-                <div className="flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg p-12 transition-colors hover:bg-accent/50">
-                    <Upload className="h-10 w-10 text-muted-foreground mb-4" />
-                    <h3 className="text-lg font-semibold text-foreground">Upload CSV Dataset</h3>
-                    <p className="text-sm text-muted-foreground mb-6 text-center max-w-sm">
-                        Drag and drop your file here, or click to browse. Expected columns: <code>loan_amnt</code>, <code>fico</code>, <code>income</code>, <code>charge_off</code>.
-                    </p>
-                    <label className="cursor-pointer">
-                        <input
-                            type="file"
-                            accept=".csv"
-                            className="hidden"
-                            onChange={handleFileChange}
-                            disabled={uploadMutation.isPending}
-                        />
-                        <span className={cn(
-                            "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
-                            "bg-primary text-primary-foreground shadow hover:bg-primary/90",
-                            "h-10 px-8 py-2"
-                        )}>
-                            {uploadMutation.isPending ? "Uploading..." : "Select File"}
-                        </span>
-                    </label>
-                    {uploadError && (
-                        <div className="mt-4 flex items-center text-destructive text-sm bg-destructive/10 p-2 rounded">
-                            <AlertCircle className="w-4 h-4 mr-2" />
-                            {uploadError}
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* Validation Feedback (Last Upload) */}
-            {datasets && datasets.length > 0 && new Date(datasets[0].created_at).getTime() > Date.now() - 60000 && (
-                <div className="bg-green-50 border border-green-100 rounded-xl p-6 flex items-start justify-between animate-in fade-in slide-in-from-top-4">
-                    <div>
-                        <h3 className="text-lg font-semibold text-green-900 flex items-center gap-2">
-                            <FileText className="h-5 w-5" />
-                            Dataset Validated & Ready
-                        </h3>
-                        <div className="mt-4 grid grid-cols-3 gap-8">
-                            <div>
-                                <p className="text-xs uppercase font-bold text-green-700">Filename</p>
-                                <p className="text-sm font-medium">{datasets[0].metadata_info?.original_filename}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs uppercase font-bold text-green-700">Row Count</p>
-                                <p className="text-sm font-medium">{datasets[0].metadata_info?.row_count?.toLocaleString() || "N/A"} rows</p>
-                            </div>
-                            <div>
-                                <p className="text-xs uppercase font-bold text-green-700">Columns Detected</p>
-                                <p className="text-sm font-medium">{(datasets[0].metadata_info?.columns as string[])?.length || 0} cols</p>
-                            </div>
-                        </div>
-                        <div className="mt-4">
-                            <span className="text-xs text-green-700 font-medium bg-green-200/50 px-2 py-1 rounded">Target candidate: Charge_Off, Loan_Status (Auto-detected)</span>
-                        </div>
+            {/* Upload Area - OR - Success State */
+            datasets && datasets.length > 0 && datasets[0].status === "VALID" ? (
+                <div className="bg-green-50 border border-green-100 rounded-xl p-8 flex flex-col items-center justify-center animate-in fade-in slide-in-from-top-4 text-center">
+                    <div className="bg-green-100 p-3 rounded-full mb-4">
+                        <FileText className="h-8 w-8 text-green-700" />
                     </div>
+                    <h3 className="text-xl font-bold text-green-900 mb-2">
+                        Dataset Validated & Ready
+                    </h3>
+                    <p className="text-green-800 mb-6">
+                        {datasets[0].metadata_info?.original_filename} ({datasets[0].metadata_info?.row_count?.toLocaleString()} rows)
+                    </p>
+                    
                     <button
                         onClick={() => navigate(`/systems/${systemId}/training`)}
-                        className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm"
+                        className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg text-lg font-bold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
                     >
-                        Proceed to Training &rarr;
+                        Proceed to Training <Play className="h-5 w-5 fill-current" />
                     </button>
+                    
+                    <div className="mt-8 text-sm text-green-700/60">
+                         Columns: {(datasets[0].metadata_info?.columns as string[])?.length || 0} detected
+                    </div>
+                </div>
+            ) : (
+                <div className="bg-card border rounded-xl p-8 shadow-sm">
+                    <div className="flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg p-12 transition-colors hover:bg-accent/50">
+                        <Upload className="h-10 w-10 text-muted-foreground mb-4" />
+                        <h3 className="text-lg font-semibold text-foreground">Upload CSV Dataset</h3>
+                        <p className="text-sm text-muted-foreground mb-6 text-center max-w-sm">
+                            Drag and drop your file here, or click to browse. Expected columns: <code>loan_amnt</code>, <code>fico</code>, <code>income</code>, <code>charge_off</code>.
+                        </p>
+                        <label className="cursor-pointer">
+                            <input
+                                type="file"
+                                accept=".csv"
+                                className="hidden"
+                                onChange={handleFileChange}
+                                disabled={uploadMutation.isPending}
+                            />
+                            <span className={cn(
+                                "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+                                "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+                                "h-10 px-8 py-2"
+                            )}>
+                                {uploadMutation.isPending ? "Uploading..." : "Select File"}
+                            </span>
+                        </label>
+                        {uploadError && (
+                            <div className="mt-4 flex items-center text-destructive text-sm bg-destructive/10 p-2 rounded">
+                                <AlertCircle className="w-4 h-4 mr-2" />
+                                {uploadError}
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
 

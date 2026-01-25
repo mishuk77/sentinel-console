@@ -64,6 +64,43 @@ export default function Models() {
         });
     })();
 
+    // Sorting State
+    const [sortConfig, setSortConfig] = useState<{ key: keyof MLModel | 'auc' | 'created_at', direction: 'asc' | 'desc' }>({ key: 'created_at', direction: 'desc' });
+
+    const handleSort = (key: keyof MLModel | 'auc' | 'created_at') => {
+        setSortConfig(current => ({
+            key,
+            direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc'
+        }));
+    };
+
+    const bestModel = candidates.length > 0
+        ? [...candidates].sort((a, b) => (b.metrics?.auc || 0) - (a.metrics?.auc || 0))[0]
+        : null;
+
+    const sortedCandidates = [...candidates].sort((a, b) => {
+        const { key, direction } = sortConfig;
+        let valA: any = a[key as keyof MLModel];
+        let valB: any = b[key as keyof MLModel];
+
+        // Custom Keys
+        if (key === 'auc') {
+            valA = a.metrics?.auc || 0;
+            valB = b.metrics?.auc || 0;
+        } else if (key === 'created_at') {
+            valA = new Date(a.created_at).getTime();
+            valB = new Date(b.created_at).getTime();
+        } else if (key === 'algorithm') {
+            // String comparison
+        } else if (key === 'name') {
+            // String comparison
+        }
+
+        if (valA < valB) return direction === 'asc' ? -1 : 1;
+        if (valA > valB) return direction === 'asc' ? 1 : -1;
+        return 0;
+    });
+
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8 relative">
             {/* Header */}
@@ -94,25 +131,31 @@ export default function Models() {
                         <table className="w-full text-sm text-left">
                             <thead className="bg-muted/50 text-muted-foreground uppercase font-medium">
                                 <tr>
-                                    <th className="px-6 py-3">Model Name</th>
-                                    <th className="px-6 py-3">Algorithm</th>
-                                    <th className="px-6 py-3">Performance (AUC)</th>
-                                    <th className="px-6 py-3">Status</th>
+                                    <th className="px-6 py-3 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('name')}>Model Name</th>
+                                    <th className="px-6 py-3 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('algorithm')}>Algorithm</th>
+                                    <th className="px-6 py-3 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('auc')}>Performance (AUC)</th>
+                                    <th className="px-6 py-3 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('status')}>Status</th>
+                                    <th className="px-6 py-3 cursor-pointer hover:bg-muted/80" onClick={() => handleSort('created_at')}>Trained At</th>
                                     <th className="px-6 py-3">Model Details</th>
                                     <th className="px-6 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {candidates.map((m) => (
+                                {sortedCandidates.map((m) => (
                                     <tr key={m.id} className={cn(
                                         "hover:bg-muted/50 transition-colors",
                                         m.status === "ACTIVE" ? "bg-green-50/50" : ""
                                     )}>
                                         <td className="px-6 py-4 font-mono text-xs font-medium text-primary">
-                                            <Link to={`/systems/${systemId}/models/${m.id}`} className="hover:underline">
-                                                {m.name}
-                                            </Link>
-                                            {m.status === "ACTIVE" && <span className="ml-2 text-green-600 font-bold">(Champion)</span>}
+                                            <div className="flex flex-col">
+                                                <Link to={`/systems/${systemId}/models/${m.id}`} className="hover:underline">
+                                                    {m.name}
+                                                </Link>
+                                                <div className="flex gap-2 mt-1">
+                                                    {m.status === "ACTIVE" && <span className="text-green-600 font-bold text-[10px] uppercase">(Champion)</span>}
+                                                    {bestModel?.id === m.id && <span className="text-blue-600 font-bold text-[10px] uppercase bg-blue-50 px-1 rounded">Recommended</span>}
+                                                </div>
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4 capitalize">{m.algorithm?.replace("_", " ")}</td>
                                         <td className="px-6 py-4 font-bold">
@@ -131,6 +174,9 @@ export default function Models() {
                                             )}>
                                                 {m.status}
                                             </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-xs text-muted-foreground">
+                                            {new Date(m.created_at).toLocaleString()}
                                         </td>
                                         <td className="px-6 py-4">
                                             <Link

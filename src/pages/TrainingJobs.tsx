@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dataset, MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Play, Loader2 } from "lucide-react";
+import { Play, Loader2, Trophy, ArrowRight, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function TrainingJobs() {
@@ -101,7 +101,13 @@ export default function TrainingJobs() {
         }
     }
 
+    // Auto-select dataset if available and not selected
+    if (datasets?.length && !selectedDataset) {
+        setSelectedDataset(datasets[0].id);
+    }
+
     // Removed startConfiguration (logic moved to button directly)
+    // ...
 
     const handleStartTraining = () => {
         if (!configuration.targetCol) {
@@ -125,6 +131,12 @@ export default function TrainingJobs() {
     const currentDataset = datasets?.find(d => d.id === selectedDataset);
     const columns = (currentDataset?.metadata_info?.columns as string[]) || [];
 
+    // SUCCESS STATE CHECK
+    const trainingComplete = // We triggered it, models exist, and NONE are training
+        justStarted === true &&
+        models && models.length > 0 &&
+        !models.some(m => m.status === "TRAINING");
+
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
             {/* Header */}
@@ -135,28 +147,44 @@ export default function TrainingJobs() {
                 </p>
             </div>
 
-            {/* Wizard Card */}
+            {/* Success Banner */}
+            {trainingComplete && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-6 flex items-center justify-between mb-8 animate-in zoom-in-95 duration-300 shadow-md">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-green-100 p-3 rounded-full">
+                            <Trophy className="h-6 w-6 text-green-700" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-bold text-green-900">Successfully Trained Models</h3>
+                            <p className="text-green-800">Your models are ready for evaluation.</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => navigate(`/systems/${systemId}/models`)}
+                        className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95"
+                    >
+                        Proceed to Model Selection <ArrowRight className="h-4 w-4" />
+                    </button>
+                </div>
+            )}
+
+            {/* Wizard Card (Hide if complete to reduce clutter? Or keep it? keeping it for re-runs but simplified) */}
             <div className="bg-card border rounded-xl p-6 shadow-sm max-w-3xl">
 
-                {/* Step 1: Dataset Selection */}
+                {/* Step 1: Dataset Selection (READ ONLY NOW) */}
                 {wizardStep === 0 && (
                     <div className="flex items-end gap-4 animate-in fade-in slide-in-from-left-4">
                         <div className="flex-1 space-y-2">
-                            <label className="text-sm font-medium leading-none">
-                                1. Select Training Dataset
+                            <label className="text-sm font-medium leading-none text-muted-foreground">
+                                Training Dataset
                             </label>
-                            <select
-                                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                                value={selectedDataset}
-                                onChange={(e) => handleDatasetSelect(e.target.value)}
-                            >
-                                <option value="">-- Select a Dataset --</option>
-                                {datasets?.map(d => (
-                                    <option key={d.id} value={d.id}>
-                                        {d.metadata_info?.original_filename || d.id} ({new Date(d.created_at).toLocaleDateString()}) - {d.metadata_info?.row_count ? d.metadata_info.row_count.toLocaleString() + ' rows' : ''}
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="text-lg font-semibold flex items-center gap-2">
+                                <FileText className="h-5 w-5 text-blue-600" />
+                                {currentDataset?.metadata_info?.original_filename || "Loading..."}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                                {currentDataset ? `${currentDataset.metadata_info?.row_count?.toLocaleString()} rows • Uploaded ${new Date(currentDataset.created_at).toLocaleDateString()}` : ""}
+                            </div>
                         </div>
                         <button
                             onClick={async () => {
@@ -184,9 +212,7 @@ export default function TrainingJobs() {
                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                         <div className="flex items-center justify-between border-b pb-4">
                             <h3 className="font-semibold text-lg">2. Preview Dataset</h3>
-                            <button onClick={() => setWizardStep(0)} className="text-xs text-muted-foreground hover:underline">
-                                Change Dataset
-                            </button>
+                            {/* Removed Change Dataset Button */}
                         </div>
 
                         <div className="space-y-4">
@@ -236,9 +262,6 @@ export default function TrainingJobs() {
                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
                         <div className="flex items-center justify-between border-b pb-4">
                             <h3 className="font-semibold text-lg">3. Configure Training Job</h3>
-                            <button onClick={() => setWizardStep(0)} className="text-xs text-muted-foreground hover:underline">
-                                Change Dataset
-                            </button>
                         </div>
 
                         {columns.length === 0 ? (
