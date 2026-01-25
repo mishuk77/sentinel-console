@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Search, Calculator, Check, X, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
+import { Search, Calculator, Check, X, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, AlertCircle, Eye, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ReasonCode {
@@ -36,6 +36,7 @@ export default function Decisions() {
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedSystemId, setSelectedSystemId] = useState<string>("");
     const [currentPage, setCurrentPage] = useState(1);
+    const [selectedDecision, setSelectedDecision] = useState<DecisionRecord | null>(null);
 
     // Fetch Systems
     const { data: systems } = useQuery<DecisionSystem[]>({
@@ -326,7 +327,11 @@ export default function Decisions() {
                                 ) : decisions?.length === 0 ? (
                                     <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No decisions found.</td></tr>
                                 ) : decisions?.map((d) => (
-                                    <tr key={d.id} className="hover:bg-muted/50 transition-colors cursor-pointer">
+                                    <tr
+                                        key={d.id}
+                                        className="hover:bg-muted/50 transition-colors cursor-pointer group"
+                                        onClick={() => setSelectedDecision(d)}
+                                    >
                                         <td className="px-6 py-4 text-xs font-mono text-muted-foreground">
                                             {systems?.find(s => s.id === d.decision_system_id)?.name || d.decision_system_id?.slice(0, 8) || "N/A"}
                                         </td>
@@ -342,8 +347,9 @@ export default function Decisions() {
                                         <td className="px-6 py-4 font-mono">
                                             {(d.score * 100).toFixed(1)}
                                         </td>
-                                        <td className="px-6 py-4 text-muted-foreground">
-                                            {new Date(d.created_at).toLocaleString()}
+                                        <td className="px-6 py-4 text-muted-foreground flex items-center justify-between">
+                                            <span>{new Date(d.created_at).toLocaleString()}</span>
+                                            <Eye className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" />
                                         </td>
                                     </tr>
                                 ))}
@@ -416,6 +422,189 @@ export default function Decisions() {
                 </div>
 
             </div>
+
+            {/* Decision Detail Modal */}
+            {selectedDecision && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+                    onClick={() => setSelectedDecision(null)}
+                >
+                    <div
+                        className="bg-background rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Modal Header */}
+                        <div className={cn(
+                            "flex items-center justify-between p-6 border-b",
+                            selectedDecision.decision === "APPROVE" ? "bg-green-50" : "bg-red-50"
+                        )}>
+                            <div className="flex items-center gap-3">
+                                <div className={cn(
+                                    "p-2 rounded-full",
+                                    selectedDecision.decision === "APPROVE" ? "bg-green-100" : "bg-red-100"
+                                )}>
+                                    {selectedDecision.decision === "APPROVE" ? (
+                                        <Check className="h-5 w-5 text-green-700" />
+                                    ) : (
+                                        <X className="h-5 w-5 text-red-700" />
+                                    )}
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold">Decision Details</h2>
+                                    <p className="text-sm text-muted-foreground">
+                                        {selectedDecision.applicant_name || "Unknown Applicant"}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setSelectedDecision(null)}
+                                className="p-2 hover:bg-muted rounded-full transition-colors"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 space-y-6">
+                            {/* Decision Summary */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                                    <div className="text-xs text-muted-foreground uppercase mb-1">Decision</div>
+                                    <div className={cn(
+                                        "font-bold text-lg",
+                                        selectedDecision.decision === "APPROVE" ? "text-green-700" : "text-red-700"
+                                    )}>
+                                        {selectedDecision.decision}
+                                    </div>
+                                </div>
+                                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                                    <div className="text-xs text-muted-foreground uppercase mb-1">Risk Score</div>
+                                    <div className="font-bold text-lg font-mono">
+                                        {(selectedDecision.score * 100).toFixed(1)}
+                                    </div>
+                                </div>
+                                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                                    <div className="text-xs text-muted-foreground uppercase mb-1">Risk Decile</div>
+                                    <div className="font-bold text-lg font-mono">
+                                        {selectedDecision.metric_decile || "-"}
+                                    </div>
+                                </div>
+                                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                                    <div className="text-xs text-muted-foreground uppercase mb-1">Date</div>
+                                    <div className="font-medium text-sm">
+                                        {new Date(selectedDecision.created_at).toLocaleDateString()}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Amount Info */}
+                            {(selectedDecision.allowed_amount || selectedDecision.approved_amount) && (
+                                <div className="border rounded-lg p-4">
+                                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                                        <FileText className="h-4 w-4" /> Amount Decision
+                                    </h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {selectedDecision.allowed_amount && (
+                                            <div>
+                                                <div className="text-xs text-muted-foreground">Max Allowed Amount</div>
+                                                <div className="text-xl font-bold font-mono">
+                                                    ${selectedDecision.allowed_amount.toLocaleString()}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {selectedDecision.approved_amount && (
+                                            <div>
+                                                <div className="text-xs text-muted-foreground">Approved Amount</div>
+                                                <div className="text-xl font-bold font-mono text-green-700">
+                                                    ${selectedDecision.approved_amount.toLocaleString()}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Reason Codes */}
+                            {selectedDecision.reason_codes && selectedDecision.reason_codes.length > 0 && (
+                                <div className="border rounded-lg p-4">
+                                    <h3 className="text-sm font-semibold mb-3">Key Factors</h3>
+                                    <div className="space-y-2">
+                                        {selectedDecision.reason_codes.map((rc: ReasonCode, idx: number) => (
+                                            <div
+                                                key={idx}
+                                                className={cn(
+                                                    "flex items-center justify-between p-3 rounded-lg",
+                                                    rc.direction === "positive" ? "bg-green-50" : "bg-red-50"
+                                                )}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    {rc.direction === "positive" ? (
+                                                        <TrendingUp className="h-4 w-4 text-green-600" />
+                                                    ) : (
+                                                        <TrendingDown className="h-4 w-4 text-red-600" />
+                                                    )}
+                                                    <span className="font-medium capitalize">
+                                                        {rc.feature.replace(/_/g, " ")}
+                                                    </span>
+                                                </div>
+                                                <span className={cn(
+                                                    "font-mono font-bold",
+                                                    rc.direction === "positive" ? "text-green-700" : "text-red-700"
+                                                )}>
+                                                    {rc.direction === "positive" ? "+" : ""}{(rc.impact * 100).toFixed(2)}%
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Input Payload */}
+                            {selectedDecision.input_payload && Object.keys(selectedDecision.input_payload).length > 0 && (
+                                <div className="border rounded-lg p-4">
+                                    <h3 className="text-sm font-semibold mb-3">Input Data</h3>
+                                    <div className="bg-muted/30 rounded-lg p-4 overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <tbody>
+                                                {Object.entries(selectedDecision.input_payload).map(([key, value]) => (
+                                                    <tr key={key} className="border-b last:border-0">
+                                                        <td className="py-2 pr-4 text-muted-foreground capitalize">
+                                                            {key.replace(/_/g, " ")}
+                                                        </td>
+                                                        <td className="py-2 font-mono font-medium text-right">
+                                                            {typeof value === "number"
+                                                                ? value.toLocaleString()
+                                                                : String(value)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* System & ID Info */}
+                            <div className="text-xs text-muted-foreground border-t pt-4 flex justify-between">
+                                <span>
+                                    System: {systems?.find(s => s.id === selectedDecision.decision_system_id)?.name || selectedDecision.decision_system_id}
+                                </span>
+                                <span className="font-mono">ID: {selectedDecision.id}</span>
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-4 border-t bg-muted/20 flex justify-end">
+                            <button
+                                onClick={() => setSelectedDecision(null)}
+                                className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

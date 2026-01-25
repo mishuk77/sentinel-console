@@ -1,44 +1,101 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { CheckCircle, Activity, TrendingUp } from "lucide-react";
+import { CheckCircle, Activity, TrendingUp, Server, ChevronDown } from "lucide-react";
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { cn } from "@/lib/utils";
+
+interface DecisionSystem {
+    id: string;
+    name: string;
+    active_model_id?: string;
+    active_policy_id?: string;
+}
 
 export default function Dashboard() {
+    const [selectedSystemId, setSelectedSystemId] = useState<string>("");
 
-    const { data: stats } = useQuery({
-        queryKey: ["dashboard-stats"],
+    // Fetch all systems first
+    const { data: systems } = useQuery<DecisionSystem[]>({
+        queryKey: ["systems"],
         queryFn: async () => {
-            const res = await api.get("/dashboard/stats");
-            return res.data;
-        },
-        refetchInterval: 5000
-    });
-
-    const { data: status } = useQuery({
-        queryKey: ["deployment-status"],
-        queryFn: async () => {
-            const res = await api.get("/dashboard/deployment-status");
+            const res = await api.get("/systems/");
             return res.data;
         }
     });
 
-    const { data: volume } = useQuery({
-        queryKey: ["dashboard-volume"],
+    // Auto-select first system if available
+    if (systems?.length && !selectedSystemId) {
+        setSelectedSystemId(systems[0].id);
+    }
+
+    const selectedSystem = systems?.find(s => s.id === selectedSystemId);
+
+    const { data: stats } = useQuery({
+        queryKey: ["dashboard-stats", selectedSystemId],
         queryFn: async () => {
-            const res = await api.get("/dashboard/volume");
+            const params = selectedSystemId ? { system_id: selectedSystemId } : {};
+            const res = await api.get("/dashboard/stats", { params });
             return res.data;
         },
-        refetchInterval: 5000
+        refetchInterval: 5000,
+        enabled: !!selectedSystemId || systems?.length === 0
+    });
+
+    const { data: status } = useQuery({
+        queryKey: ["deployment-status", selectedSystemId],
+        queryFn: async () => {
+            const params = selectedSystemId ? { system_id: selectedSystemId } : {};
+            const res = await api.get("/dashboard/deployment-status", { params });
+            return res.data;
+        },
+        enabled: !!selectedSystemId || systems?.length === 0
+    });
+
+    const { data: volume } = useQuery({
+        queryKey: ["dashboard-volume", selectedSystemId],
+        queryFn: async () => {
+            const params = selectedSystemId ? { system_id: selectedSystemId } : {};
+            const res = await api.get("/dashboard/volume", { params });
+            return res.data;
+        },
+        refetchInterval: 5000,
+        enabled: !!selectedSystemId || systems?.length === 0
     });
 
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
             {/* Header */}
-            <div>
-                <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
-                <p className="text-muted-foreground mt-2">
-                    Operational overview of Sentinel decisioning engine.
-                </p>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
+                    <p className="text-muted-foreground mt-2">
+                        Operational overview of Sentinel decisioning engine.
+                    </p>
+                </div>
+
+                {/* System Selector */}
+                {systems && systems.length > 0 && (
+                    <div className="flex items-center gap-2">
+                        <Server className="h-4 w-4 text-muted-foreground" />
+                        <div className="relative">
+                            <select
+                                value={selectedSystemId}
+                                onChange={(e) => setSelectedSystemId(e.target.value)}
+                                className={cn(
+                                    "appearance-none bg-card border rounded-lg pl-3 pr-8 py-2 text-sm font-medium",
+                                    "focus:outline-none focus:ring-2 focus:ring-primary/20",
+                                    "cursor-pointer min-w-[200px]"
+                                )}
+                            >
+                                {systems.map(sys => (
+                                    <option key={sys.id} value={sys.id}>{sys.name}</option>
+                                ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Deployment Status Widget */}
@@ -47,9 +104,21 @@ export default function Dashboard() {
                     <Activity className="h-24 w-24" />
                 </div>
                 <div className="relative z-10">
-                    <div className="flex items-center space-x-2 mb-4">
-                        <div className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />
-                        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">System Status: Active</h2>
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center space-x-2">
+                            <div className={cn(
+                                "h-2 w-2 rounded-full",
+                                status?.model?.name ? "bg-green-400 animate-pulse" : "bg-yellow-400"
+                            )} />
+                            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
+                                {status?.model?.name ? "System Active" : "System Pending Setup"}
+                            </h2>
+                        </div>
+                        {selectedSystem && (
+                            <span className="text-xs bg-white/10 px-3 py-1 rounded-full">
+                                {selectedSystem.name}
+                            </span>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
