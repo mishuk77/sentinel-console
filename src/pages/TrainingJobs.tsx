@@ -74,32 +74,7 @@ export default function TrainingJobs() {
         },
     });
 
-    const handleDatasetSelect = (id: string) => {
-        setSelectedDataset(id);
-        const ds = datasets?.find(d => d.id === id);
-        // Reset config
-        setConfiguration({ targetCol: "", featureCols: [] });
-
-        // Auto-detect columns if available
-        if (ds && ds.metadata_info?.columns) {
-            const cols = ds.metadata_info.columns as string[];
-            // Heuristic: Try to find "charge_off" or "target"
-            const likelyTarget = cols.find(c => ["charge_off", "target", "label", "bad_loan"].includes(c.toLowerCase()));
-            if (likelyTarget) {
-                setConfiguration(prev => ({
-                    ...prev,
-                    targetCol: likelyTarget,
-                    featureCols: cols.filter(c => c !== likelyTarget && !["id", "customer_id"].includes(c.toLowerCase()))
-                }));
-            } else {
-                // Select all features by default except ID
-                setConfiguration(prev => ({
-                    ...prev,
-                    featureCols: cols.filter(c => !["id", "customer_id"].includes(c.toLowerCase()))
-                }));
-            }
-        }
-    }
+    // handleDatasetSelect removed as it's no longer used in the simplified wizard
 
     // Auto-select dataset if available and not selected
     if (datasets?.length && !selectedDataset) {
