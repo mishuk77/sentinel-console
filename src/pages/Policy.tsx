@@ -18,6 +18,7 @@ interface ProjectedStats {
 
 export default function Policy() {
     const { systemId } = useParams<{ systemId: string }>();
+    const queryClient = useQueryClient();
     const { system } = useSystem();
     const [searchParams] = useSearchParams();
     const initialModelId = searchParams.get("model_id") || "";
@@ -168,6 +169,7 @@ export default function Policy() {
             await api.put(`/policies/${policyId}/activate`);
         },
         onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["system", systemId] }); // Update active policy in context
             setActivationSuccess(true);
             setTimeout(() => setActivationSuccess(false), 3000);
         }

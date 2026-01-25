@@ -28,6 +28,8 @@ export default function ModelDetail() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["model", id] });
+            queryClient.invalidateQueries({ queryKey: ["models", systemId] });
+            queryClient.invalidateQueries({ queryKey: ["system", systemId] }); // Critical: Updates active_model_id in SystemLayout
         },
     });
 

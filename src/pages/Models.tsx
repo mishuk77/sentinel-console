@@ -31,6 +31,7 @@ export default function Models() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["models"] });
+            queryClient.invalidateQueries({ queryKey: ["system", systemId] });
         },
         onError: (err: any) => {
             console.error(err);
