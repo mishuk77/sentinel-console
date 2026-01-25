@@ -29,6 +29,8 @@ export default function TrainingJobs() {
 
     // State to track if we just triggered a job (to force polling)
     const [justStarted, setJustStarted] = useState(false);
+    // New state to persist success message after polling stops
+    const [showSuccess, setShowSuccess] = useState(false);
 
     // Fetch Models (Jobs) - Poll every 1s if any are training OR we just started one
     const { data: models } = useQuery<MLModel[]>({
@@ -45,12 +47,17 @@ export default function TrainingJobs() {
         }
     });
 
-    // Reset justStarted if we see training models
-    if (justStarted && models?.some(m => m.status === "TRAINING")) {
-        setJustStarted(false);
+    // Detect Completion: If we were polling (justStarted=true) and now no models are training, it means we finished.
+    if (justStarted && models && models.length > 0) {
+        const isTraining = models.some(m => m.status === "TRAINING");
+        if (!isTraining) {
+            // Training finished!
+            setJustStarted(false); // Stop polling/tracking
+            setShowSuccess(true);  // Show success message
+        }
     }
 
-    // Safety timeout to stop polling if nothing shows up after 15s
+    // Safety timeout to stop polling if nothing shows up after 15s (e.g. backend error)
     if (justStarted) {
         setTimeout(() => setJustStarted(false), 15000);
     }
@@ -66,6 +73,7 @@ export default function TrainingJobs() {
             setWizardStep(0); // Reset
             setSelectedDataset("");
             setJustStarted(true); // Trigger polling
+            setShowSuccess(false); // Reset success state
         },
         onError: (err) => {
             console.error(err);
@@ -107,10 +115,8 @@ export default function TrainingJobs() {
     const columns = (currentDataset?.metadata_info?.columns as string[]) || [];
 
     // SUCCESS STATE CHECK
-    const trainingComplete = // We triggered it, models exist, and NONE are training
-        justStarted === true &&
-        models && models.length > 0 &&
-        !models.some(m => m.status === "TRAINING");
+    // Now simply relies on the showSuccess state variable
+    const trainingComplete = showSuccess;
 
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
