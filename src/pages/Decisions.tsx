@@ -325,7 +325,40 @@ export default function Decisions() {
                                 {isLoading ? (
                                     <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Loading decisions...</td></tr>
                                 ) : decisions?.length === 0 ? (
-                                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No decisions found.</td></tr>
+                                    <tr>
+                                        <td colSpan={5} className="p-12 text-center">
+                                            <div className="bg-muted/30 rounded-full h-14 w-14 flex items-center justify-center mx-auto mb-4">
+                                                <FileText className="h-7 w-7 text-muted-foreground/50" />
+                                            </div>
+                                            <h3 className="text-base font-semibold text-foreground mb-2">No Decisions Yet</h3>
+                                            <p className="text-muted-foreground mb-4 max-w-sm mx-auto text-sm">
+                                                Test your decision system using the manual form, or integrate via API.
+                                            </p>
+                                            <div className="flex items-center justify-center gap-3">
+                                                <a
+                                                    href="#manual-test"
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        document.querySelector('input[name="applicant_name"]')?.closest('.bg-card')?.scrollIntoView({ behavior: 'smooth' });
+                                                    }}
+                                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                                                >
+                                                    <Calculator className="h-4 w-4" />
+                                                    Run Manual Test
+                                                </a>
+                                                <span className="text-muted-foreground">•</span>
+                                                <a
+                                                    href="/api/docs"
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                                                >
+                                                    <FileText className="h-4 w-4" />
+                                                    API Documentation
+                                                </a>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 ) : decisions?.map((d) => (
                                     <tr
                                         key={d.id}

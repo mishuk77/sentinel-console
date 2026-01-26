@@ -4,6 +4,7 @@ import { api, type DecisionSystem } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { LayoutDashboard, Database, BrainCircuit, Shield, ArrowLeft, Globe, Settings as Sliders, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 
 export default function SystemLayout() {
     const { systemId } = useParams<{ systemId: string }>();
@@ -87,6 +88,10 @@ export default function SystemLayout() {
 
                 {/* Main Content Area */}
                 <main className="flex-1 bg-background/50">
+                    {/* Breadcrumb Navigation */}
+                    <div className="px-8 py-3 border-b bg-muted/20">
+                        <Breadcrumbs systemName={system.name} />
+                    </div>
                     <Outlet context={{ system }} />
                 </main>
             </div>
