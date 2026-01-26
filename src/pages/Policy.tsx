@@ -321,10 +321,9 @@ export default function Policy() {
                         </>
                     )}
                 </div>
-            </div>
 
-            {/* Charts & Tables */}
-            <div className="lg:col-span-2 space-y-6">
+                {/* Charts & Tables - Now inside the grid */}
+                <div className="lg:col-span-2 space-y-6">
                 {!selectedModel ? (
                     <div className="bg-card border rounded-xl p-12 flex flex-col items-center justify-center text-muted-foreground h-full min-h-[400px]">
                         <Scale className="h-12 w-12 mb-4 opacity-20" />
@@ -434,10 +433,11 @@ export default function Policy() {
 
                     </div>
                 )}
+                </div>
             </div>
 
             {/* Policy History Section */}
-            <div className="bg-card border rounded-xl shadow-sm overflow-hidden mt-8">
+            <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
                 <div className="px-6 py-4 border-b">
                     <h3 className="font-semibold text-lg">Policy History</h3>
                 </div>
