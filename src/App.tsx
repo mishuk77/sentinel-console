@@ -15,6 +15,7 @@ import SystemLayout from "@/pages/SystemLayout";
 import SystemOverview from "@/pages/SystemOverview";
 import Login from "@/pages/Login";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
+import { ThemeProvider } from "@/lib/ThemeContext";
 import { Navigate } from "react-router-dom";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -28,8 +29,9 @@ const queryClient = new QueryClient();
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <BrowserRouter>
+      <ThemeProvider>
+        <AuthProvider>
+          <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
 
@@ -60,8 +62,9 @@ function App() {
               <Route path="/deployments" element={<Deployments />} />
             </Route>
           </Routes>
-        </BrowserRouter>
-      </AuthProvider>
+          </BrowserRouter>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

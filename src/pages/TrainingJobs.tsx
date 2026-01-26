@@ -523,8 +523,25 @@ export default function TrainingJobs() {
                 ) : (
                     // Only show "No training jobs" if we are IDLE. If starting/polling, the pulse card above handles it.
                     trainingState === 'IDLE' && (
-                        <div className="p-12 text-center text-muted-foreground bg-gray-50 rounded-xl border border-dashed">
-                            No training jobs started yet.
+                        <div className="p-12 text-center bg-gray-50 rounded-xl border border-dashed">
+                            <div className="bg-muted/30 rounded-full h-14 w-14 flex items-center justify-center mx-auto mb-4">
+                                <Play className="h-7 w-7 text-muted-foreground/50" />
+                            </div>
+                            <h3 className="text-base font-semibold text-foreground mb-2">No Training Jobs Yet</h3>
+                            <p className="text-muted-foreground text-sm max-w-md mx-auto mb-4">
+                                {datasets && datasets.length > 0
+                                    ? "Use the wizard above to configure and start your first training job."
+                                    : "Upload a dataset first, then return here to train models."}
+                            </p>
+                            {(!datasets || datasets.length === 0) && (
+                                <button
+                                    onClick={() => navigate(`/systems/${systemId}/datasets`)}
+                                    className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+                                >
+                                    <FileText className="h-4 w-4" />
+                                    Upload Dataset First
+                                </button>
+                            )}
                         </div>
                     )
                 )}

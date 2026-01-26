@@ -231,11 +231,17 @@ export default function Datasets() {
                         Loading datasets...
                     </div>
                 ) : datasets?.length === 0 ? (
-                    <div className="p-12 text-center text-muted-foreground">
-                        <div className="bg-muted/50 rounded-full h-12 w-12 flex items-center justify-center mx-auto mb-4">
-                            <FileText className="h-6 w-6 opacity-50" />
+                    <div className="p-12 text-center">
+                        <div className="bg-muted/30 rounded-full h-14 w-14 flex items-center justify-center mx-auto mb-4">
+                            <FileText className="h-7 w-7 text-muted-foreground/50" />
                         </div>
-                        No datasets found. Upload one above to get started.
+                        <h3 className="text-base font-semibold text-foreground mb-2">No Datasets Uploaded</h3>
+                        <p className="text-muted-foreground text-sm max-w-md mx-auto mb-4">
+                            Upload your historical credit data (CSV format) to begin training risk models.
+                        </p>
+                        <div className="text-xs text-muted-foreground bg-muted/20 inline-block px-4 py-2 rounded-lg">
+                            <strong>Required:</strong> Include a target column (e.g., <code className="bg-muted px-1 rounded">charged_off</code>, <code className="bg-muted px-1 rounded">default</code>)
+                        </div>
                     </div>
                 ) : (
                     <table className="w-full text-sm text-left">
