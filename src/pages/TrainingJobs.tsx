@@ -3,10 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dataset, MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Play, Loader2, Trophy, ArrowRight, FileText } from "lucide-react";
+import { Play, Loader2, Trophy, ArrowRight, FileText, CheckCircle2, Clock, Cpu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type TrainingState = 'IDLE' | 'STARTING' | 'POLLING' | 'COMPLETED';
+type TrainingState = 'IDLE' | 'STARTING' | 'TRAINING' | 'COMPLETED';
 
 export default function TrainingJobs() {
     const { systemId } = useParams<{ systemId: string }>();
@@ -23,8 +23,10 @@ export default function TrainingJobs() {
     // Explicit State Machine for Training Process
     const [trainingState, setTrainingState] = useState<TrainingState>('IDLE');
 
-    // Safety timer ref
-    const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Elapsed time tracking
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const startTimeRef = useRef<number | null>(null);
+    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Snapshot of model count before training starts
     const initialModelCountRef = useRef<number>(0);
@@ -47,12 +49,12 @@ export default function TrainingJobs() {
             return res.data;
         },
         enabled: !!systemId,
-        // Poll aggressively during STARTING and POLLING phases
+        // Poll aggressively during STARTING and TRAINING phases
         refetchInterval: (query) => {
             const anyTraining = query.state.data?.some(m => m.status === "TRAINING");
 
             // If we are actively polling or just starting, poll every 1s
-            if (trainingState === 'STARTING' || trainingState === 'POLLING') return 1000;
+            if (trainingState === 'STARTING' || trainingState === 'TRAINING') return 1000;
 
             // If we passively see something training (e.g. page refresh), also poll
             if (anyTraining) return 1000;
@@ -60,6 +62,33 @@ export default function TrainingJobs() {
             return false;
         }
     });
+
+    // Elapsed time effect
+    useEffect(() => {
+        if (trainingState === 'STARTING' || trainingState === 'TRAINING') {
+            if (!startTimeRef.current) {
+                startTimeRef.current = Date.now();
+            }
+            timerRef.current = setInterval(() => {
+                if (startTimeRef.current) {
+                    setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
+                }
+            }, 1000);
+        } else {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+            if (trainingState === 'IDLE') {
+                startTimeRef.current = null;
+                setElapsedSeconds(0);
+            }
+        }
+
+        return () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
+    }, [trainingState]);
 
     // State Transitions Effect
     useEffect(() => {
@@ -71,33 +100,23 @@ export default function TrainingJobs() {
         const hasTrainingModels = models.some(m => m.status === "TRAINING");
 
         if (trainingState === 'STARTING') {
-            // We only transition if we see a NEW model appear.
+            // We only transition if we see a NEW model appear
             if (hasNewModels) {
                 // Determine if the new model is already done or still training
                 if (hasTrainingModels) {
-                    setTrainingState('POLLING');
+                    setTrainingState('TRAINING');
                 } else {
                     // It finished instantly!
                     setTrainingState('COMPLETED');
                 }
-
-                // Clear safety timer as we have success
-                if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
             }
-        } else if (trainingState === 'POLLING') {
+        } else if (trainingState === 'TRAINING') {
             if (!hasTrainingModels) {
                 // Transition to COMPLETED once all jobs finish
                 setTrainingState('COMPLETED');
             }
         }
     }, [models, trainingState]);
-
-    // Cleanup timer on unmount
-    useEffect(() => {
-        return () => {
-            if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
-        };
-    }, []);
 
     // Start Training Mutation
     const trainMutation = useMutation({
@@ -115,25 +134,20 @@ export default function TrainingJobs() {
 
             // Start the State Machine
             setTrainingState('STARTING');
-
-            // Safety: If we don't see models appear within 20s, reset state to avoid infinite loading
-            if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
-            safetyTimerRef.current = setTimeout(() => {
-                setTrainingState((current) => {
-                    if (current === 'STARTING') {
-                        setError("Training request timed out or no models were created.");
-                        return 'IDLE';
-                    }
-                    return current;
-                });
-            }, 20000);
         },
         onError: (err) => {
             console.error(err);
-            setError("Failed to start training.");
+            setError("Failed to start training. Please try again.");
             setTrainingState('IDLE');
         },
     });
+
+    // Cancel/dismiss training UI (acknowledge it may still be running)
+    const handleDismissTraining = () => {
+        setTrainingState('IDLE');
+        startTimeRef.current = null;
+        setElapsedSeconds(0);
+    };
 
     // Auto-select dataset if available and not selected
     if (datasets?.length && !selectedDataset) {
@@ -162,6 +176,27 @@ export default function TrainingJobs() {
     const currentDataset = datasets?.find(d => d.id === selectedDataset);
     const columns = (currentDataset?.metadata_info?.columns as string[]) || [];
 
+    // Format elapsed time
+    const formatTime = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        if (mins > 0) {
+            return `${mins}m ${secs}s`;
+        }
+        return `${secs}s`;
+    };
+
+    // Determine training progress step
+    const getTrainingStep = () => {
+        if (trainingState === 'STARTING') return 1;
+        if (trainingState === 'TRAINING') return 2;
+        if (trainingState === 'COMPLETED') return 3;
+        return 0;
+    };
+
+    const trainingStep = getTrainingStep();
+    const isTrainingActive = trainingState === 'STARTING' || trainingState === 'TRAINING';
+
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
             {/* Header */}
@@ -172,6 +207,97 @@ export default function TrainingJobs() {
                 </p>
             </div>
 
+            {/* Training Progress Card - Shows during active training */}
+            {isTrainingActive && (
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6 shadow-sm animate-in fade-in slide-in-from-top-4">
+                    <div className="flex items-start justify-between mb-6">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-blue-100 p-3 rounded-full">
+                                <Cpu className="h-6 w-6 text-blue-700 animate-pulse" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-blue-900">Training in Progress</h3>
+                                <p className="text-blue-700 text-sm">
+                                    Sentinel is training 3 models using different algorithms
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleDismissTraining}
+                            className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
+                            title="Dismiss (training will continue in background)"
+                        >
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
+
+                    {/* Progress Steps */}
+                    <div className="flex items-center gap-2 mb-6">
+                        {[
+                            { step: 1, label: "Request Sent", icon: CheckCircle2 },
+                            { step: 2, label: "Models Training", icon: Cpu },
+                            { step: 3, label: "Complete", icon: Trophy },
+                        ].map((item, idx) => (
+                            <div key={item.step} className="flex items-center flex-1">
+                                <div className={cn(
+                                    "flex items-center gap-2 px-3 py-2 rounded-lg transition-all flex-1",
+                                    trainingStep >= item.step
+                                        ? "bg-blue-600 text-white"
+                                        : "bg-white/50 text-blue-400 border border-blue-200"
+                                )}>
+                                    <item.icon className={cn(
+                                        "h-4 w-4",
+                                        trainingStep === item.step && item.step < 3 && "animate-pulse"
+                                    )} />
+                                    <span className="text-sm font-medium">{item.label}</span>
+                                </div>
+                                {idx < 2 && (
+                                    <div className={cn(
+                                        "h-0.5 w-4 mx-1",
+                                        trainingStep > item.step ? "bg-blue-600" : "bg-blue-200"
+                                    )} />
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Elapsed Time & Status */}
+                    <div className="bg-white/60 rounded-lg p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <Clock className="h-5 w-5 text-blue-600" />
+                            <div>
+                                <p className="text-sm font-medium text-blue-900">Elapsed Time</p>
+                                <p className="text-2xl font-mono font-bold text-blue-700">{formatTime(elapsedSeconds)}</p>
+                            </div>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-sm font-medium text-blue-900">Status</p>
+                            <p className="text-sm text-blue-700">
+                                {trainingState === 'STARTING' && elapsedSeconds < 30 && (
+                                    "Initializing training environment..."
+                                )}
+                                {trainingState === 'STARTING' && elapsedSeconds >= 30 && (
+                                    <span className="text-amber-600">
+                                        Taking longer than usual. Models are still being created...
+                                    </span>
+                                )}
+                                {trainingState === 'TRAINING' && (
+                                    "Models are actively training. This typically takes 30-60 seconds."
+                                )}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Helpful message for long waits */}
+                    {trainingState === 'STARTING' && elapsedSeconds >= 45 && (
+                        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                            <strong>Note:</strong> The backend is processing your request. Models will appear automatically once created.
+                            You can dismiss this and check back later - training continues in the background.
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Success Banner - Only show when explicitly COMPLETED */}
             {trainingState === 'COMPLETED' && (
                 <div className="bg-green-50 border border-green-200 rounded-xl p-6 flex items-center justify-between mb-8 animate-in zoom-in-95 duration-300 shadow-md">
@@ -181,7 +307,10 @@ export default function TrainingJobs() {
                         </div>
                         <div>
                             <h3 className="text-lg font-bold text-green-900">Successfully Trained Models</h3>
-                            <p className="text-green-800">Your models are ready for evaluation.</p>
+                            <p className="text-green-800">
+                                {elapsedSeconds > 0 ? `Completed in ${formatTime(elapsedSeconds)}. ` : ''}
+                                Your models are ready for evaluation.
+                            </p>
                         </div>
                     </div>
                     <button
@@ -438,21 +567,6 @@ export default function TrainingJobs() {
                     <h3 className="font-semibold text-lg">Active Jobs & Results</h3>
                 </div>
 
-                {/* VISUAL FEEDBACK: Force show initializing state if we are STARTING or POLLING even if the list is empty at first */}
-                {(trainingState === 'STARTING' || trainingState === 'POLLING') && (
-                    <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-5 animate-pulse flex items-center gap-4 mb-4">
-                        <Loader2 className="h-6 w-6 text-blue-600 animate-spin" />
-                        <div>
-                            <h4 className="font-semibold text-blue-900">
-                                {trainingState === 'STARTING' ? "Initializing Training Environment..." : "Training in Progress..."}
-                            </h4>
-                            <p className="text-sm text-blue-700">
-                                {trainingState === 'STARTING' ? "Sending job requests and allocating resources." : "Models are being trained. This may take a few minutes."}
-                            </p>
-                        </div>
-                    </div>
-                )}
-
                 {models && models.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {(() => {
@@ -521,8 +635,8 @@ export default function TrainingJobs() {
                         })()}
                     </div>
                 ) : (
-                    // Only show "No training jobs" if we are IDLE. If starting/polling, the pulse card above handles it.
-                    trainingState === 'IDLE' && (
+                    // Only show "No training jobs" if we are IDLE and not actively training
+                    !isTrainingActive && (
                         <div className="p-12 text-center bg-gray-50 rounded-xl border border-dashed">
                             <div className="bg-muted/30 rounded-full h-14 w-14 flex items-center justify-center mx-auto mb-4">
                                 <Play className="h-7 w-7 text-muted-foreground/50" />
