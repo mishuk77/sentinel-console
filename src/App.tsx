@@ -9,6 +9,7 @@ import Models from "@/pages/Models";
 import ModelDetail from "@/pages/ModelDetail";
 import Deployments from "@/pages/Deployments";
 import Policy from "@/pages/Policy";
+import ExposureControl from "@/pages/ExposureControl";
 import Decisions from "@/pages/Decisions";
 import DecisionSystems from "@/pages/DecisionSystems";
 import SystemLayout from "@/pages/SystemLayout";
@@ -49,6 +50,7 @@ function App() {
                 <Route path="models" element={<Models />} />
                 <Route path="models/:id" element={<ModelDetail />} />
                 <Route path="policy" element={<Policy />} />
+                <Route path="exposure" element={<ExposureControl />} />
                 <Route path="deployments" element={<Deployments />} />
               </Route>
 

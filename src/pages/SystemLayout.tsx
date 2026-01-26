@@ -2,7 +2,7 @@ import { Outlet, NavLink, useParams, Link, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query";
 import { api, type DecisionSystem } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
-import { LayoutDashboard, Database, BrainCircuit, Shield, ArrowLeft, Globe, Settings as Sliders, LogOut } from "lucide-react";
+import { LayoutDashboard, Database, BrainCircuit, Shield, ArrowLeft, Globe, Settings as Sliders, LogOut, DollarSign } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 
@@ -34,6 +34,7 @@ export default function SystemLayout() {
         { to: `/systems/${systemId}/training`, icon: BrainCircuit, label: "Training Runs" },
         { to: `/systems/${systemId}/models`, icon: Shield, label: "Models" },
         { to: `/systems/${systemId}/policy`, icon: Sliders, label: "Policy" },
+        { to: `/systems/${systemId}/exposure`, icon: DollarSign, label: "Exposure Control" },
         { to: `/systems/${systemId}/deployments`, icon: Globe, label: "Integration" },
     ];
 
