@@ -109,23 +109,49 @@ export default function ExposureControl() {
         };
     }, [calibration, amountLadder]);
 
-    // Generate AI recommendations
-    const generateAmountRecommendations = async () => {
-        if (!activeModel) return;
+    // Generate AI recommendations using client-side logic based on calibration data
+    const generateAmountRecommendations = () => {
+        if (!activeModel || !calibration.length) return;
         setIsGeneratingAmounts(true);
-        try {
-            const res = await api.post("/policies/recommend-amounts", {
-                model_id: activeModel.id,
-                decision_system_id: systemId
+
+        // Simulate async processing for UX
+        setTimeout(() => {
+            // Calculate recommendations based on risk rates
+            // Lower risk deciles get higher amounts, higher risk deciles get lower amounts
+            const maxAmount = 50000;
+            const minAmount = 5000;
+
+            // Sort calibration by decile
+            const sortedCalibration = [...calibration].sort((a: any, b: any) => a.decile - b.decile);
+
+            // Find min and max risk rates for normalization
+            const riskRates = sortedCalibration.map((bin: any) => bin.actual_rate);
+            const minRisk = Math.min(...riskRates);
+            const maxRisk = Math.max(...riskRates);
+            const riskRange = maxRisk - minRisk || 1;
+
+            const newLadder: Record<string, number> = {};
+
+            sortedCalibration.forEach((bin: any) => {
+                const decile = bin.decile;
+                const riskRate = bin.actual_rate;
+
+                // Normalize risk to 0-1 scale
+                const normalizedRisk = (riskRate - minRisk) / riskRange;
+
+                // Inverse relationship: higher risk = lower amount
+                // Use exponential decay for more aggressive reduction at high risk
+                const riskFactor = Math.pow(1 - normalizedRisk, 1.5);
+
+                // Calculate amount: scale between min and max
+                const amount = Math.round((minAmount + (maxAmount - minAmount) * riskFactor) / 1000) * 1000;
+
+                newLadder[String(decile)] = amount;
             });
-            if (res.data?.amount_ladder) {
-                setAmountLadder(res.data.amount_ladder);
-            }
-        } catch (err) {
-            console.error("Failed to generate amount recommendations:", err);
-        } finally {
+
+            setAmountLadder(newLadder);
             setIsGeneratingAmounts(false);
-        }
+        }, 800); // Brief delay for perceived processing
     };
 
     // Save exposure settings
