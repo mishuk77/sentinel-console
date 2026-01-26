@@ -13,6 +13,7 @@ const routeLabels: Record<string, string> = {
     training: "Training Jobs",
     models: "Model Registry",
     policy: "Policy Configuration",
+    exposure: "Exposure Control",
     deployments: "Integration",
     decisions: "Decisions",
     systems: "Decision Systems",
