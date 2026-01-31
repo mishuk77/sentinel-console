@@ -17,6 +17,7 @@ const routeLabels: Record<string, string> = {
     fraud: "Fraud Management",
     queue: "Case Queue",
     cases: "Case Detail",
+    rules: "Rules",
     deployments: "Integration",
     decisions: "Decisions",
     systems: "Decision Systems",
@@ -84,6 +85,15 @@ export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
                     });
                     items.push({
                         label: caseId ? `Case ${caseId.slice(0, 8)}...` : "Case Detail",
+                        href: undefined
+                    });
+                } else if (subSegment === "rules") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: routeLabels.rules,
                         href: undefined
                     });
                 } else {

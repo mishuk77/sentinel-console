@@ -13,6 +13,7 @@ import ExposureControl from "@/pages/ExposureControl";
 import FraudDashboard from "@/pages/FraudDashboard";
 import FraudQueue from "@/pages/FraudQueue";
 import FraudCaseDetail from "@/pages/FraudCaseDetail";
+import FraudRules from "@/pages/FraudRules";
 import Decisions from "@/pages/Decisions";
 import DecisionSystems from "@/pages/DecisionSystems";
 import SystemLayout from "@/pages/SystemLayout";
@@ -57,6 +58,7 @@ function App() {
                 <Route path="fraud" element={<FraudDashboard />} />
                 <Route path="fraud/queue" element={<FraudQueue />} />
                 <Route path="fraud/cases/:caseId" element={<FraudCaseDetail />} />
+                <Route path="fraud/rules" element={<FraudRules />} />
                 <Route path="deployments" element={<Deployments />} />
               </Route>
 

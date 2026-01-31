@@ -8,7 +8,9 @@ import {
     AlertTriangle,
     TrendingUp,
     ArrowRight,
-    Activity
+    Activity,
+    Users,
+    Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -295,6 +297,98 @@ export default function FraudDashboard() {
                             ))}
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            {/* Bottom Row - Analyst Performance & Quick Links */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Analyst Performance */}
+                <div className="lg:col-span-2 bg-card border rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b flex items-center justify-between">
+                        <div>
+                            <h3 className="font-semibold flex items-center gap-2">
+                                <Users className="h-5 w-5 text-indigo-500" />
+                                Analyst Performance
+                            </h3>
+                            <p className="text-sm text-muted-foreground">Review metrics by team member</p>
+                        </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="bg-muted/50">
+                                <tr>
+                                    <th className="h-10 px-6 text-left font-medium text-muted-foreground">Analyst</th>
+                                    <th className="h-10 px-6 text-right font-medium text-muted-foreground">Cases Reviewed</th>
+                                    <th className="h-10 px-6 text-right font-medium text-muted-foreground">Avg Time</th>
+                                    <th className="h-10 px-6 text-right font-medium text-muted-foreground">Approval Rate</th>
+                                    <th className="h-10 px-6 text-right font-medium text-muted-foreground">SLA Compliance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {analytics.analyst_performance?.map((analyst) => (
+                                    <tr key={analyst.analyst_id} className="border-b last:border-0 hover:bg-muted/30">
+                                        <td className="px-6 py-3 font-medium">{analyst.analyst_name}</td>
+                                        <td className="px-6 py-3 text-right font-mono">{analyst.cases_reviewed}</td>
+                                        <td className="px-6 py-3 text-right font-mono">{analyst.avg_review_time_minutes}m</td>
+                                        <td className="px-6 py-3 text-right">
+                                            <span className={cn(
+                                                "font-mono",
+                                                analyst.approval_rate >= 70 ? "text-green-600" :
+                                                    analyst.approval_rate >= 50 ? "text-yellow-600" : "text-red-600"
+                                            )}>
+                                                {analyst.approval_rate}%
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-3 text-right">
+                                            <span className={cn(
+                                                "inline-flex items-center px-2 py-1 rounded-full text-xs font-medium",
+                                                analyst.sla_compliance >= 90 ? "bg-green-100 text-green-700" :
+                                                    analyst.sla_compliance >= 70 ? "bg-yellow-100 text-yellow-700" :
+                                                        "bg-red-100 text-red-700"
+                                            )}>
+                                                {analyst.sla_compliance}%
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="bg-card border rounded-xl p-6 shadow-sm">
+                    <h3 className="font-semibold mb-4 flex items-center gap-2">
+                        <Zap className="h-5 w-5 text-purple-500" />
+                        Quick Actions
+                    </h3>
+                    <div className="space-y-3">
+                        <Link
+                            to={`/systems/${systemId}/fraud/queue?queue=critical`}
+                            className="flex items-center justify-between p-3 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+                        >
+                            <span className="text-sm font-medium text-red-900">Review Critical Cases</span>
+                            <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">
+                                {analytics.queue_depth.critical}
+                            </span>
+                        </Link>
+                        <Link
+                            to={`/systems/${systemId}/fraud/queue?queue=high`}
+                            className="flex items-center justify-between p-3 border border-orange-200 bg-orange-50 rounded-lg hover:bg-orange-100 transition-colors"
+                        >
+                            <span className="text-sm font-medium text-orange-900">Review High Priority</span>
+                            <span className="bg-orange-600 text-white text-xs font-bold px-2 py-1 rounded-full">
+                                {analytics.queue_depth.high}
+                            </span>
+                        </Link>
+                        <Link
+                            to={`/systems/${systemId}/fraud/rules`}
+                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                        >
+                            <span className="text-sm font-medium">Manage Rules</span>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                        </Link>
+                    </div>
                 </div>
             </div>
         </div>

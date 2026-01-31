@@ -5,7 +5,10 @@ import type {
     FraudAnalytics,
     FraudRiskLevel,
     FraudCaseStatus,
-    FraudSignalType
+    FraudSignalType,
+    FraudRule,
+    FraudRuleSimulation,
+    VerificationRequest
 } from "./api";
 
 // Signal definitions for realistic fraud detection
@@ -264,6 +267,26 @@ export function generateFraudAnalytics(cases: FraudCase[]): FraudAnalytics {
         .sort((a, b) => b.trigger_count - a.trigger_count)
         .slice(0, 10);
 
+    // Analyst performance
+    const analysts = ["analyst_1", "analyst_2", "analyst_3"];
+    const analystPerformance = analysts.map(analystId => {
+        const analystCases = resolvedCases.filter(c => c.assigned_to === analystId);
+        const analystApproved = analystCases.filter(c => c.outcome === "approved");
+        const analystWithinSLA = analystCases.filter(c => {
+            if (!c.resolved_at) return false;
+            return new Date(c.resolved_at) <= new Date(c.sla_deadline);
+        });
+
+        return {
+            analyst_id: analystId,
+            analyst_name: analystId.replace("_", " ").replace(/\b\w/g, l => l.toUpperCase()),
+            cases_reviewed: analystCases.length,
+            avg_review_time_minutes: randomInt(12, 35),
+            approval_rate: analystCases.length > 0 ? Math.round((analystApproved.length / analystCases.length) * 100) : 0,
+            sla_compliance: analystCases.length > 0 ? Math.round((analystWithinSLA.length / analystCases.length) * 100) : 100,
+        };
+    });
+
     return {
         cases_today: casesToday.length,
         cases_pending: pendingCases.length,
@@ -274,6 +297,7 @@ export function generateFraudAnalytics(cases: FraudCase[]): FraudAnalytics {
         daily_trend: dailyTrend,
         score_distribution: scoreDistribution,
         top_signals: topSignals,
+        analyst_performance: analystPerformance,
     };
 }
 
@@ -299,4 +323,271 @@ export function updateFraudCase(caseId: string, updates: Partial<FraudCase>): Fr
 
     cachedCases[index] = { ...cachedCases[index], ...updates };
     return cachedCases[index];
+}
+
+// ============================================
+// FRAUD RULES
+// ============================================
+
+// Available fields for rule conditions
+export const RULE_FIELDS = [
+    { field: "fraud_score", label: "Fraud Score", type: "number" },
+    { field: "amount_requested", label: "Amount Requested", type: "number" },
+    { field: "device_type", label: "Device Type", type: "string" },
+    { field: "ip_country", label: "IP Country", type: "string" },
+    { field: "email_domain", label: "Email Domain", type: "string" },
+    { field: "applications_24h", label: "Applications (24h)", type: "number" },
+    { field: "applications_7d", label: "Applications (7d)", type: "number" },
+    { field: "device_age_days", label: "Device Age (days)", type: "number" },
+    { field: "address_match", label: "Address Match Score", type: "number" },
+    { field: "phone_carrier", label: "Phone Carrier", type: "string" },
+    { field: "ssn_velocity", label: "SSN Velocity (30d)", type: "number" },
+    { field: "ip_velocity", label: "IP Velocity (24h)", type: "number" },
+];
+
+// Pre-built rule templates
+const RULE_TEMPLATES: Omit<FraudRule, "id" | "decision_system_id" | "created_at" | "updated_at" | "trigger_count_30d" | "last_triggered_at">[] = [
+    {
+        name: "High Score Auto-Decline",
+        description: "Automatically decline applications with fraud scores above 900",
+        rule_type: "threshold",
+        conditions: [{ id: "c1", field: "fraud_score", operator: "gte", value: 900 }],
+        logic: "AND",
+        action: "auto_decline",
+        score_impact: 0,
+        is_active: true,
+        priority: 1,
+    },
+    {
+        name: "Velocity Alert - Multiple Apps",
+        description: "Flag when more than 3 applications from same identity in 24 hours",
+        rule_type: "velocity",
+        conditions: [{ id: "c1", field: "applications_24h", operator: "gt", value: 3 }],
+        logic: "AND",
+        action: "escalate",
+        score_impact: 150,
+        is_active: true,
+        priority: 2,
+    },
+    {
+        name: "High Amount + New Device",
+        description: "Require verification for large amounts from devices seen less than 7 days",
+        rule_type: "combination",
+        conditions: [
+            { id: "c1", field: "amount_requested", operator: "gte", value: 25000 },
+            { id: "c2", field: "device_age_days", operator: "lt", value: 7 },
+        ],
+        logic: "AND",
+        action: "require_verification",
+        score_impact: 100,
+        is_active: true,
+        priority: 3,
+    },
+    {
+        name: "Suspicious Email Domain",
+        description: "Flag applications using temporary email providers",
+        rule_type: "pattern",
+        conditions: [{ id: "c1", field: "email_domain", operator: "in", value: ["tempmail.com", "throwaway.email", "guerrillamail.com", "10minutemail.com"] }],
+        logic: "AND",
+        action: "flag",
+        score_impact: 75,
+        is_active: true,
+        priority: 4,
+    },
+    {
+        name: "Foreign IP + High Amount",
+        description: "Escalate high-value applications from non-US IPs",
+        rule_type: "combination",
+        conditions: [
+            { id: "c1", field: "ip_country", operator: "neq", value: "US" },
+            { id: "c2", field: "amount_requested", operator: "gte", value: 15000 },
+        ],
+        logic: "AND",
+        action: "escalate",
+        score_impact: 125,
+        is_active: false,
+        priority: 5,
+    },
+    {
+        name: "SSN Velocity Spike",
+        description: "Flag when SSN is used more than 2 times in 30 days",
+        rule_type: "velocity",
+        conditions: [{ id: "c1", field: "ssn_velocity", operator: "gt", value: 2 }],
+        logic: "AND",
+        action: "flag",
+        score_impact: 200,
+        is_active: true,
+        priority: 6,
+    },
+    {
+        name: "Address Mismatch",
+        description: "Require verification when address match score is below 50%",
+        rule_type: "threshold",
+        conditions: [{ id: "c1", field: "address_match", operator: "lt", value: 50 }],
+        logic: "AND",
+        action: "require_verification",
+        score_impact: 50,
+        is_active: true,
+        priority: 7,
+    },
+    {
+        name: "IP Flood Detection",
+        description: "Auto-decline when IP has more than 10 applications in 24 hours",
+        rule_type: "velocity",
+        conditions: [{ id: "c1", field: "ip_velocity", operator: "gt", value: 10 }],
+        logic: "AND",
+        action: "auto_decline",
+        score_impact: 300,
+        is_active: true,
+        priority: 8,
+    },
+];
+
+let cachedRules: FraudRule[] | null = null;
+
+export function generateFraudRules(systemId: string): FraudRule[] {
+    return RULE_TEMPLATES.map((template) => ({
+        ...template,
+        id: `rule_${generateId()}`,
+        decision_system_id: systemId,
+        created_at: new Date(Date.now() - randomInt(7, 90) * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - randomInt(0, 7) * 86400000).toISOString(),
+        trigger_count_30d: randomInt(5, 150),
+        last_triggered_at: Math.random() > 0.3
+            ? new Date(Date.now() - randomInt(0, 72) * 3600000).toISOString()
+            : null,
+    }));
+}
+
+export function getFraudRules(systemId: string, forceRefresh = false): FraudRule[] {
+    if (!cachedRules || forceRefresh) {
+        cachedRules = generateFraudRules(systemId);
+    }
+    return cachedRules;
+}
+
+export function getFraudRule(ruleId: string, systemId: string): FraudRule | undefined {
+    const rules = getFraudRules(systemId);
+    return rules.find(r => r.id === ruleId);
+}
+
+export function createFraudRule(systemId: string, rule: Omit<FraudRule, "id" | "decision_system_id" | "created_at" | "updated_at" | "trigger_count_30d" | "last_triggered_at">): FraudRule {
+    const newRule: FraudRule = {
+        ...rule,
+        id: `rule_${generateId()}`,
+        decision_system_id: systemId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        trigger_count_30d: 0,
+        last_triggered_at: null,
+    };
+
+    if (!cachedRules) cachedRules = [];
+    cachedRules.push(newRule);
+    return newRule;
+}
+
+export function updateFraudRule(ruleId: string, updates: Partial<FraudRule>): FraudRule | undefined {
+    if (!cachedRules) return undefined;
+    const index = cachedRules.findIndex(r => r.id === ruleId);
+    if (index === -1) return undefined;
+
+    cachedRules[index] = {
+        ...cachedRules[index],
+        ...updates,
+        updated_at: new Date().toISOString(),
+    };
+    return cachedRules[index];
+}
+
+export function deleteFraudRule(ruleId: string): boolean {
+    if (!cachedRules) return false;
+    const index = cachedRules.findIndex(r => r.id === ruleId);
+    if (index === -1) return false;
+
+    cachedRules.splice(index, 1);
+    return true;
+}
+
+export function simulateFraudRule(rule: FraudRule, systemId: string): FraudRuleSimulation {
+    const cases = getFraudCases(systemId);
+    const totalApplications = cases.length;
+
+    // Simulate which cases would be affected
+    // This is a simplified simulation - in production, you'd evaluate actual conditions
+    const triggerRate = rule.conditions.length > 1
+        ? randomInt(5, 15)
+        : randomInt(10, 25);
+
+    const wouldTrigger = Math.round(totalApplications * (triggerRate / 100));
+    const falsePositiveEstimate = Math.round(wouldTrigger * (randomInt(10, 30) / 100));
+
+    // Generate sample matches
+    const sampleMatches = cases
+        .slice(0, 5)
+        .map(c => ({
+            application_id: c.application_id,
+            applicant_name: c.applicant_name,
+            current_score: c.fraud_score.score,
+            would_be_score: Math.min(1000, c.fraud_score.score + rule.score_impact),
+        }));
+
+    return {
+        rule_id: rule.id,
+        total_applications: totalApplications,
+        would_trigger: wouldTrigger,
+        trigger_rate: triggerRate,
+        false_positive_estimate: falsePositiveEstimate,
+        sample_matches: sampleMatches,
+    };
+}
+
+// ============================================
+// VERIFICATION TRACKING
+// ============================================
+
+let cachedVerifications: Map<string, VerificationRequest[]> = new Map();
+
+export function getVerificationsForCase(caseId: string): VerificationRequest[] {
+    return cachedVerifications.get(caseId) || [];
+}
+
+export function createVerificationRequest(
+    caseId: string,
+    type: VerificationRequest["verification_type"]
+): VerificationRequest {
+    const verification: VerificationRequest = {
+        id: `ver_${generateId()}`,
+        case_id: caseId,
+        verification_type: type,
+        status: "sent",
+        result: null,
+        attempts: 1,
+        sent_at: new Date().toISOString(),
+        completed_at: null,
+        expires_at: new Date(Date.now() + 24 * 3600000).toISOString(), // 24 hours
+    };
+
+    const existing = cachedVerifications.get(caseId) || [];
+    existing.push(verification);
+    cachedVerifications.set(caseId, existing);
+
+    // Simulate async completion after a delay
+    setTimeout(() => {
+        const verifications = cachedVerifications.get(caseId);
+        if (verifications) {
+            const idx = verifications.findIndex(v => v.id === verification.id);
+            if (idx !== -1) {
+                const passed = Math.random() > 0.3; // 70% pass rate
+                verifications[idx] = {
+                    ...verifications[idx],
+                    status: "completed",
+                    result: passed ? "pass" : "fail",
+                    completed_at: new Date().toISOString(),
+                };
+            }
+        }
+    }, randomInt(3000, 8000)); // Complete after 3-8 seconds
+
+    return verification;
 }

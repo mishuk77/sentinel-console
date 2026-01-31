@@ -1,7 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { getFraudCase, updateFraudCase } from "@/lib/fraudData";
-import type { FraudSignalType } from "@/lib/api";
+import { getFraudCase, updateFraudCase, getVerificationsForCase, createVerificationRequest } from "@/lib/fraudData";
+import type { FraudSignalType, VerificationRequest } from "@/lib/api";
 import {
     ArrowLeft,
     ShieldAlert,
@@ -38,11 +38,26 @@ export default function FraudCaseDetail() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [actionSuccess, setActionSuccess] = useState<string | null>(null);
     const [notes, setNotes] = useState("");
+    const [verifications, setVerifications] = useState<VerificationRequest[]>([]);
+    const [verificationRefresh, setVerificationRefresh] = useState(0);
 
     const fraudCase = useMemo(() => {
         if (!caseId || !systemId) return null;
         return getFraudCase(caseId, systemId);
     }, [caseId, systemId]);
+
+    // Load and refresh verifications
+    useEffect(() => {
+        if (caseId) {
+            const loadVerifications = () => {
+                setVerifications(getVerificationsForCase(caseId));
+            };
+            loadVerifications();
+            // Refresh every 2 seconds to check for completed verifications
+            const interval = setInterval(loadVerifications, 2000);
+            return () => clearInterval(interval);
+        }
+    }, [caseId, verificationRefresh]);
 
     if (!fraudCase) {
         return (
@@ -85,8 +100,38 @@ export default function FraudCaseDetail() {
     };
 
     const handleVerification = (type: "otp" | "kba" | "document" | "call") => {
-        // In production, this would initiate a verification request
-        alert(`Verification request (${type}) would be sent to ${fraudCase.applicant_email}`);
+        // Check if there's already a pending verification of this type
+        const existingPending = verifications.find(
+            v => v.verification_type === type && (v.status === "pending" || v.status === "sent")
+        );
+        if (existingPending) {
+            return; // Don't allow duplicate pending verifications
+        }
+
+        // Create the verification request
+        const newVerification = createVerificationRequest(fraudCase.id, type);
+        setVerifications([...verifications, newVerification]);
+        setVerificationRefresh(prev => prev + 1);
+    };
+
+    const getVerificationStatusColor = (status: VerificationRequest["status"]) => {
+        switch (status) {
+            case "pending": return "bg-gray-100 text-gray-700";
+            case "sent": return "bg-blue-100 text-blue-700";
+            case "completed": return "bg-green-100 text-green-700";
+            case "failed": return "bg-red-100 text-red-700";
+            case "expired": return "bg-yellow-100 text-yellow-700";
+            default: return "bg-gray-100 text-gray-700";
+        }
+    };
+
+    const getVerificationResultColor = (result: VerificationRequest["result"]) => {
+        switch (result) {
+            case "pass": return "text-green-600";
+            case "fail": return "text-red-600";
+            case "inconclusive": return "text-yellow-600";
+            default: return "text-gray-600";
+        }
     };
 
     const score = fraudCase.fraud_score;
@@ -443,33 +488,70 @@ export default function FraudCaseDetail() {
                             <div className="grid grid-cols-2 gap-2">
                                 <button
                                     onClick={() => handleVerification("otp")}
-                                    className="flex flex-col items-center gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                                    disabled={verifications.some(v => v.verification_type === "otp" && (v.status === "pending" || v.status === "sent"))}
+                                    className="flex flex-col items-center gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <Send className="h-5 w-5 text-blue-600" />
                                     <span className="text-xs font-medium">OTP</span>
                                 </button>
                                 <button
                                     onClick={() => handleVerification("kba")}
-                                    className="flex flex-col items-center gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                                    disabled={verifications.some(v => v.verification_type === "kba" && (v.status === "pending" || v.status === "sent"))}
+                                    className="flex flex-col items-center gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <KeyRound className="h-5 w-5 text-purple-600" />
                                     <span className="text-xs font-medium">KBA</span>
                                 </button>
                                 <button
                                     onClick={() => handleVerification("document")}
-                                    className="flex flex-col items-center gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                                    disabled={verifications.some(v => v.verification_type === "document" && (v.status === "pending" || v.status === "sent"))}
+                                    className="flex flex-col items-center gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <FileText className="h-5 w-5 text-green-600" />
                                     <span className="text-xs font-medium">Document</span>
                                 </button>
                                 <button
                                     onClick={() => handleVerification("call")}
-                                    className="flex flex-col items-center gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                                    disabled={verifications.some(v => v.verification_type === "call" && (v.status === "pending" || v.status === "sent"))}
+                                    className="flex flex-col items-center gap-2 p-3 border rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <Phone className="h-5 w-5 text-orange-600" />
                                     <span className="text-xs font-medium">Call</span>
                                 </button>
                             </div>
+
+                            {/* Verification History */}
+                            {verifications.length > 0 && (
+                                <div className="mt-4 pt-4 border-t">
+                                    <p className="text-xs font-medium text-muted-foreground uppercase mb-2">Verification History</p>
+                                    <div className="space-y-2">
+                                        {verifications.map((v) => (
+                                            <div key={v.id} className="flex items-center justify-between bg-muted/30 px-3 py-2 rounded-lg">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-medium uppercase">{v.verification_type}</span>
+                                                    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", getVerificationStatusColor(v.status))}>
+                                                        {v.status === "sent" && "Awaiting Response"}
+                                                        {v.status === "pending" && "Pending"}
+                                                        {v.status === "completed" && "Completed"}
+                                                        {v.status === "failed" && "Failed"}
+                                                        {v.status === "expired" && "Expired"}
+                                                    </span>
+                                                </div>
+                                                {v.result && (
+                                                    <span className={cn("text-xs font-bold uppercase", getVerificationResultColor(v.result))}>
+                                                        {v.result === "pass" && "✓ Passed"}
+                                                        {v.result === "fail" && "✗ Failed"}
+                                                        {v.result === "inconclusive" && "? Inconclusive"}
+                                                    </span>
+                                                )}
+                                                {!v.result && v.status === "sent" && (
+                                                    <span className="text-xs text-muted-foreground animate-pulse">Processing...</span>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 

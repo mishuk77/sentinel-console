@@ -199,4 +199,57 @@ export interface FraudAnalytics {
         trigger_count: number;
         avg_risk_contribution: number;
     }[];
+    analyst_performance?: {
+        analyst_id: string;
+        analyst_name: string;
+        cases_reviewed: number;
+        avg_review_time_minutes: number;
+        approval_rate: number;
+        sla_compliance: number;
+    }[];
+}
+
+// Fraud Rules Types
+
+export type FraudRuleType = "threshold" | "velocity" | "pattern" | "combination";
+export type FraudRuleAction = "flag" | "auto_decline" | "escalate" | "require_verification";
+export type FraudRuleOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "in";
+
+export interface FraudRuleCondition {
+    id: string;
+    field: string;
+    operator: FraudRuleOperator;
+    value: string | number | string[];
+}
+
+export interface FraudRule {
+    id: string;
+    decision_system_id: string;
+    name: string;
+    description: string;
+    rule_type: FraudRuleType;
+    conditions: FraudRuleCondition[];
+    logic: "AND" | "OR";
+    action: FraudRuleAction;
+    score_impact: number; // Points to add to fraud score when triggered
+    is_active: boolean;
+    priority: number; // Lower = higher priority
+    created_at: string;
+    updated_at: string;
+    trigger_count_30d: number;
+    last_triggered_at: string | null;
+}
+
+export interface FraudRuleSimulation {
+    rule_id: string;
+    total_applications: number;
+    would_trigger: number;
+    trigger_rate: number;
+    false_positive_estimate: number;
+    sample_matches: {
+        application_id: string;
+        applicant_name: string;
+        current_score: number;
+        would_be_score: number;
+    }[];
 }
