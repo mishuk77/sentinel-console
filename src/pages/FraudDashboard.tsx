@@ -10,7 +10,11 @@ import {
     ArrowRight,
     Activity,
     Users,
-    Zap
+    Zap,
+    Brain,
+    Radio,
+    Settings,
+    Scale
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -365,28 +369,58 @@ export default function FraudDashboard() {
                     <div className="space-y-3">
                         <Link
                             to={`/systems/${systemId}/fraud/queue?queue=critical`}
-                            className="flex items-center justify-between p-3 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+                            className="flex items-center justify-between p-3 border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 rounded-lg hover:bg-red-100 dark:hover:bg-red-950/50 transition-colors"
                         >
-                            <span className="text-sm font-medium text-red-900">Review Critical Cases</span>
+                            <span className="text-sm font-medium text-red-900 dark:text-red-200">Review Critical Cases</span>
                             <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full">
                                 {analytics.queue_depth.critical}
                             </span>
                         </Link>
                         <Link
                             to={`/systems/${systemId}/fraud/queue?queue=high`}
-                            className="flex items-center justify-between p-3 border border-orange-200 bg-orange-50 rounded-lg hover:bg-orange-100 transition-colors"
+                            className="flex items-center justify-between p-3 border border-orange-200 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-900 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-950/50 transition-colors"
                         >
-                            <span className="text-sm font-medium text-orange-900">Review High Priority</span>
+                            <span className="text-sm font-medium text-orange-900 dark:text-orange-200">Review High Priority</span>
                             <span className="bg-orange-600 text-white text-xs font-bold px-2 py-1 rounded-full">
                                 {analytics.queue_depth.high}
                             </span>
                         </Link>
+
+                        <div className="border-t my-3 pt-3">
+                            <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Configuration</p>
+                        </div>
+
                         <Link
                             to={`/systems/${systemId}/fraud/rules`}
-                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                            className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                         >
+                            <Scale className="h-4 w-4 text-indigo-500" />
                             <span className="text-sm font-medium">Manage Rules</span>
-                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                            <ArrowRight className="h-4 w-4 text-muted-foreground ml-auto" />
+                        </Link>
+                        <Link
+                            to={`/systems/${systemId}/fraud/models`}
+                            className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                        >
+                            <Brain className="h-4 w-4 text-purple-500" />
+                            <span className="text-sm font-medium">ML Models</span>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground ml-auto" />
+                        </Link>
+                        <Link
+                            to={`/systems/${systemId}/fraud/signals`}
+                            className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                        >
+                            <Radio className="h-4 w-4 text-teal-500" />
+                            <span className="text-sm font-medium">Signal Providers</span>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground ml-auto" />
+                        </Link>
+                        <Link
+                            to={`/systems/${systemId}/fraud/settings`}
+                            className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                        >
+                            <Settings className="h-4 w-4 text-gray-500" />
+                            <span className="text-sm font-medium">Automation Settings</span>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground ml-auto" />
                         </Link>
                     </div>
                 </div>

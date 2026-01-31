@@ -18,9 +18,21 @@ const routeLabels: Record<string, string> = {
     queue: "Case Queue",
     cases: "Case Detail",
     rules: "Rules",
+    signals: "Signal Providers",
+    settings: "Automation Settings",
     deployments: "Integration",
     decisions: "Decisions",
     systems: "Decision Systems",
+};
+
+// Labels for fraud sub-routes when "models" is under fraud context
+const fraudSubLabels: Record<string, string> = {
+    queue: "Case Queue",
+    cases: "Case Detail",
+    rules: "Rules",
+    models: "ML Models",
+    signals: "Signal Providers",
+    settings: "Automation Settings",
 };
 
 export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
@@ -93,7 +105,34 @@ export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
                         href: `/systems/${systemId}/fraud`
                     });
                     items.push({
-                        label: routeLabels.rules,
+                        label: fraudSubLabels.rules,
+                        href: undefined
+                    });
+                } else if (subSegment === "models") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: fraudSubLabels.models,
+                        href: undefined
+                    });
+                } else if (subSegment === "signals") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: fraudSubLabels.signals,
+                        href: undefined
+                    });
+                } else if (subSegment === "settings") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: fraudSubLabels.settings,
                         href: undefined
                     });
                 } else {

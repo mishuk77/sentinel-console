@@ -16,9 +16,7 @@ import {
     Archive,
     AlertTriangle,
     X,
-    TrendingUp,
     Target,
-    Percent,
     BarChart3,
     RefreshCw,
     Zap
@@ -463,7 +461,7 @@ export default function FraudModels() {
                                                             tick={{ fontSize: 11 }}
                                                         />
                                                         <Tooltip
-                                                            formatter={(value: number) => `${value.toFixed(1)}%`}
+                                                            formatter={(value) => value != null ? `${Number(value).toFixed(1)}%` : ''}
                                                         />
                                                         <Bar dataKey="importance" fill="#9333ea" radius={[0, 4, 4, 0]} />
                                                     </BarChart>
