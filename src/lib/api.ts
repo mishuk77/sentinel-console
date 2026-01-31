@@ -253,3 +253,89 @@ export interface FraudRuleSimulation {
         would_be_score: number;
     }[];
 }
+
+// Fraud ML Model Types
+
+export type FraudModelStatus = "training" | "validating" | "ready" | "active" | "archived" | "failed";
+export type FraudModelAlgorithm = "gradient_boosting" | "random_forest" | "neural_network" | "ensemble";
+
+export interface FraudModel {
+    id: string;
+    decision_system_id: string;
+    name: string;
+    description: string;
+    algorithm: FraudModelAlgorithm;
+    status: FraudModelStatus;
+    is_active: boolean;
+    training_config: {
+        features: string[];
+        target_variable: string;
+        train_test_split: number;
+        hyperparameters: Record<string, number | string>;
+    };
+    metrics?: {
+        auc: number;
+        precision: number;
+        recall: number;
+        f1_score: number;
+        false_positive_rate: number;
+        detection_rate: number;
+        lift_at_10_percent: number;
+    };
+    feature_importance?: {
+        feature: string;
+        importance: number;
+    }[];
+    training_samples: number;
+    fraud_samples: number;
+    created_at: string;
+    trained_at: string | null;
+    version: string;
+}
+
+// Signal Provider Types
+
+export type SignalProviderStatus = "connected" | "disconnected" | "error" | "pending";
+export type SignalProviderType = "identity" | "device" | "behavior" | "consortium" | "bureau";
+
+export interface SignalProvider {
+    id: string;
+    decision_system_id: string;
+    name: string;
+    provider_type: SignalProviderType;
+    description: string;
+    status: SignalProviderStatus;
+    is_enabled: boolean;
+    api_endpoint?: string;
+    signals_provided: string[];
+    avg_latency_ms: number;
+    success_rate: number;
+    cost_per_call: number;
+    calls_today: number;
+    last_sync_at: string | null;
+    config: Record<string, string | boolean | number>;
+}
+
+// Automation Settings Types
+
+export interface FraudAutomationSettings {
+    decision_system_id: string;
+    // Auto-assignment
+    auto_assign_enabled: boolean;
+    assignment_strategy: "round_robin" | "load_balanced" | "skill_based";
+    max_cases_per_analyst: number;
+    // Auto-decisioning
+    auto_approve_below_score: number;
+    auto_decline_above_score: number;
+    auto_decision_enabled: boolean;
+    // Escalation
+    escalation_timeout_minutes: number;
+    auto_escalate_on_timeout: boolean;
+    // Notifications
+    notify_on_critical: boolean;
+    notify_on_sla_breach: boolean;
+    notification_channels: ("email" | "slack" | "webhook")[];
+    // Batch operations
+    batch_review_enabled: boolean;
+    batch_size_limit: number;
+}

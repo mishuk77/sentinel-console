@@ -8,7 +8,10 @@ import type {
     FraudSignalType,
     FraudRule,
     FraudRuleSimulation,
-    VerificationRequest
+    VerificationRequest,
+    FraudModel,
+    SignalProvider,
+    FraudAutomationSettings
 } from "./api";
 
 // Signal definitions for realistic fraud detection
@@ -590,4 +593,375 @@ export function createVerificationRequest(
     }, randomInt(3000, 8000)); // Complete after 3-8 seconds
 
     return verification;
+}
+
+// ============================================
+// FRAUD ML MODELS
+// ============================================
+
+export const FRAUD_MODEL_FEATURES = [
+    { id: "fraud_score", label: "Base Fraud Score", category: "score" },
+    { id: "device_fingerprint_age", label: "Device Fingerprint Age", category: "device" },
+    { id: "ip_risk_score", label: "IP Risk Score", category: "device" },
+    { id: "email_age_days", label: "Email Account Age", category: "identity" },
+    { id: "phone_line_type", label: "Phone Line Type", category: "identity" },
+    { id: "address_velocity", label: "Address Velocity (30d)", category: "velocity" },
+    { id: "ssn_velocity", label: "SSN Velocity (30d)", category: "velocity" },
+    { id: "device_velocity", label: "Device Velocity (24h)", category: "velocity" },
+    { id: "session_duration", label: "Session Duration", category: "behavioral" },
+    { id: "form_completion_time", label: "Form Completion Time", category: "behavioral" },
+    { id: "mouse_entropy", label: "Mouse Movement Entropy", category: "behavioral" },
+    { id: "keystroke_dynamics", label: "Keystroke Dynamics Score", category: "behavioral" },
+    { id: "amount_requested", label: "Amount Requested", category: "application" },
+    { id: "income_stated", label: "Stated Income", category: "application" },
+    { id: "employment_length", label: "Employment Length", category: "application" },
+];
+
+const FRAUD_MODEL_TEMPLATES: Omit<FraudModel, "id" | "decision_system_id">[] = [
+    {
+        name: "Fraud Detection v3.2",
+        description: "Production fraud model with ensemble approach combining gradient boosting and neural networks",
+        algorithm: "ensemble",
+        status: "active",
+        is_active: true,
+        training_config: {
+            features: ["fraud_score", "device_fingerprint_age", "ip_risk_score", "email_age_days", "ssn_velocity", "session_duration", "amount_requested"],
+            target_variable: "is_fraud",
+            train_test_split: 0.8,
+            hyperparameters: { n_estimators: 500, max_depth: 8, learning_rate: 0.05 },
+        },
+        metrics: {
+            auc: 0.94,
+            precision: 0.87,
+            recall: 0.82,
+            f1_score: 0.84,
+            false_positive_rate: 0.03,
+            detection_rate: 0.82,
+            lift_at_10_percent: 8.2,
+        },
+        feature_importance: [
+            { feature: "ssn_velocity", importance: 0.23 },
+            { feature: "device_fingerprint_age", importance: 0.18 },
+            { feature: "ip_risk_score", importance: 0.15 },
+            { feature: "session_duration", importance: 0.12 },
+            { feature: "fraud_score", importance: 0.11 },
+            { feature: "email_age_days", importance: 0.09 },
+            { feature: "amount_requested", importance: 0.07 },
+        ],
+        training_samples: 125000,
+        fraud_samples: 3750,
+        created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+        trained_at: new Date(Date.now() - 28 * 86400000).toISOString(),
+        version: "3.2.0",
+    },
+    {
+        name: "Fraud Detection v3.1",
+        description: "Previous production model using gradient boosting",
+        algorithm: "gradient_boosting",
+        status: "archived",
+        is_active: false,
+        training_config: {
+            features: ["fraud_score", "device_fingerprint_age", "ip_risk_score", "ssn_velocity", "amount_requested"],
+            target_variable: "is_fraud",
+            train_test_split: 0.8,
+            hyperparameters: { n_estimators: 300, max_depth: 6, learning_rate: 0.1 },
+        },
+        metrics: {
+            auc: 0.91,
+            precision: 0.82,
+            recall: 0.78,
+            f1_score: 0.80,
+            false_positive_rate: 0.05,
+            detection_rate: 0.78,
+            lift_at_10_percent: 7.1,
+        },
+        feature_importance: [
+            { feature: "ssn_velocity", importance: 0.28 },
+            { feature: "ip_risk_score", importance: 0.22 },
+            { feature: "fraud_score", importance: 0.19 },
+            { feature: "device_fingerprint_age", importance: 0.17 },
+            { feature: "amount_requested", importance: 0.14 },
+        ],
+        training_samples: 100000,
+        fraud_samples: 2800,
+        created_at: new Date(Date.now() - 90 * 86400000).toISOString(),
+        trained_at: new Date(Date.now() - 88 * 86400000).toISOString(),
+        version: "3.1.0",
+    },
+    {
+        name: "Behavioral Analysis Model",
+        description: "Specialized model focusing on user behavior patterns",
+        algorithm: "neural_network",
+        status: "ready",
+        is_active: false,
+        training_config: {
+            features: ["session_duration", "form_completion_time", "mouse_entropy", "keystroke_dynamics"],
+            target_variable: "is_fraud",
+            train_test_split: 0.75,
+            hyperparameters: { layers: 3, neurons: 128, dropout: 0.3, epochs: 100 },
+        },
+        metrics: {
+            auc: 0.88,
+            precision: 0.79,
+            recall: 0.85,
+            f1_score: 0.82,
+            false_positive_rate: 0.06,
+            detection_rate: 0.85,
+            lift_at_10_percent: 6.8,
+        },
+        feature_importance: [
+            { feature: "mouse_entropy", importance: 0.31 },
+            { feature: "keystroke_dynamics", importance: 0.28 },
+            { feature: "session_duration", importance: 0.24 },
+            { feature: "form_completion_time", importance: 0.17 },
+        ],
+        training_samples: 80000,
+        fraud_samples: 2400,
+        created_at: new Date(Date.now() - 14 * 86400000).toISOString(),
+        trained_at: new Date(Date.now() - 12 * 86400000).toISOString(),
+        version: "1.0.0",
+    },
+];
+
+let cachedFraudModels: FraudModel[] | null = null;
+
+export function getFraudModels(systemId: string, forceRefresh = false): FraudModel[] {
+    if (!cachedFraudModels || forceRefresh) {
+        cachedFraudModels = FRAUD_MODEL_TEMPLATES.map((template) => ({
+            ...template,
+            id: `fm_${generateId()}`,
+            decision_system_id: systemId,
+        }));
+    }
+    return cachedFraudModels;
+}
+
+export function getFraudModel(modelId: string, systemId: string): FraudModel | undefined {
+    const models = getFraudModels(systemId);
+    return models.find(m => m.id === modelId);
+}
+
+export function createFraudModel(
+    systemId: string,
+    model: Pick<FraudModel, "name" | "description" | "algorithm" | "training_config">
+): FraudModel {
+    const newModel: FraudModel = {
+        id: `fm_${generateId()}`,
+        decision_system_id: systemId,
+        name: model.name,
+        description: model.description,
+        algorithm: model.algorithm,
+        status: "training",
+        is_active: false,
+        training_config: model.training_config,
+        training_samples: 0,
+        fraud_samples: 0,
+        created_at: new Date().toISOString(),
+        trained_at: null,
+        version: "1.0.0",
+    };
+
+    if (!cachedFraudModels) cachedFraudModels = [];
+    cachedFraudModels.push(newModel);
+
+    // Simulate training completion
+    setTimeout(() => {
+        const idx = cachedFraudModels?.findIndex(m => m.id === newModel.id);
+        if (idx !== undefined && idx !== -1 && cachedFraudModels) {
+            cachedFraudModels[idx] = {
+                ...cachedFraudModels[idx],
+                status: "ready",
+                trained_at: new Date().toISOString(),
+                training_samples: randomInt(50000, 150000),
+                fraud_samples: randomInt(1500, 5000),
+                metrics: {
+                    auc: 0.85 + Math.random() * 0.1,
+                    precision: 0.75 + Math.random() * 0.15,
+                    recall: 0.70 + Math.random() * 0.15,
+                    f1_score: 0.72 + Math.random() * 0.15,
+                    false_positive_rate: 0.03 + Math.random() * 0.05,
+                    detection_rate: 0.70 + Math.random() * 0.15,
+                    lift_at_10_percent: 5 + Math.random() * 4,
+                },
+                feature_importance: model.training_config.features.map(f => ({
+                    feature: f,
+                    importance: Math.random(),
+                })).sort((a, b) => b.importance - a.importance),
+            };
+        }
+    }, randomInt(5000, 10000));
+
+    return newModel;
+}
+
+export function activateFraudModel(modelId: string): FraudModel | undefined {
+    if (!cachedFraudModels) return undefined;
+
+    // Deactivate all other models
+    cachedFraudModels.forEach(m => {
+        if (m.is_active) {
+            m.is_active = false;
+            m.status = "ready";
+        }
+    });
+
+    // Activate the selected model
+    const idx = cachedFraudModels.findIndex(m => m.id === modelId);
+    if (idx === -1) return undefined;
+
+    cachedFraudModels[idx] = {
+        ...cachedFraudModels[idx],
+        is_active: true,
+        status: "active",
+    };
+
+    return cachedFraudModels[idx];
+}
+
+// ============================================
+// SIGNAL PROVIDERS
+// ============================================
+
+const SIGNAL_PROVIDER_TEMPLATES: Omit<SignalProvider, "id" | "decision_system_id">[] = [
+    {
+        name: "Socure ID+",
+        provider_type: "identity",
+        description: "Real-time identity verification and fraud risk assessment",
+        status: "connected",
+        is_enabled: true,
+        api_endpoint: "https://api.socure.com/v3",
+        signals_provided: ["ssn_validity", "name_match", "address_match", "dob_match", "synthetic_id_risk"],
+        avg_latency_ms: 245,
+        success_rate: 99.2,
+        cost_per_call: 0.15,
+        calls_today: 1250,
+        last_sync_at: new Date(Date.now() - 300000).toISOString(),
+        config: { api_key_set: true, sandbox_mode: false },
+    },
+    {
+        name: "ThreatMetrix",
+        provider_type: "device",
+        description: "Device fingerprinting and digital identity intelligence",
+        status: "connected",
+        is_enabled: true,
+        api_endpoint: "https://api.threatmetrix.com/v6",
+        signals_provided: ["device_fingerprint", "device_age", "device_velocity", "proxy_detection", "emulator_detection", "geolocation_risk"],
+        avg_latency_ms: 180,
+        success_rate: 99.8,
+        cost_per_call: 0.08,
+        calls_today: 2100,
+        last_sync_at: new Date(Date.now() - 120000).toISOString(),
+        config: { org_id_set: true, policy_id: "default" },
+    },
+    {
+        name: "BioCatch",
+        provider_type: "behavior",
+        description: "Behavioral biometrics and continuous authentication",
+        status: "connected",
+        is_enabled: true,
+        api_endpoint: "https://api.biocatch.com/v2",
+        signals_provided: ["behavioral_score", "mouse_dynamics", "keystroke_analysis", "session_anomaly", "bot_detection"],
+        avg_latency_ms: 320,
+        success_rate: 98.5,
+        cost_per_call: 0.12,
+        calls_today: 890,
+        last_sync_at: new Date(Date.now() - 600000).toISOString(),
+        config: { customer_id_set: true, real_time: true },
+    },
+    {
+        name: "Early Warning",
+        provider_type: "consortium",
+        description: "Bank consortium data for fraud and risk signals",
+        status: "connected",
+        is_enabled: false,
+        api_endpoint: "https://api.earlywarning.com/v1",
+        signals_provided: ["account_abuse", "deposit_risk", "velocity_flags", "negative_history"],
+        avg_latency_ms: 450,
+        success_rate: 97.8,
+        cost_per_call: 0.25,
+        calls_today: 0,
+        last_sync_at: null,
+        config: { participant_id_set: true, product: "ews_fraud" },
+    },
+    {
+        name: "Experian Fraud Shield",
+        provider_type: "bureau",
+        description: "Credit bureau fraud indicators and identity verification",
+        status: "pending",
+        is_enabled: false,
+        api_endpoint: "https://api.experian.com/fraud/v1",
+        signals_provided: ["fraud_shield_score", "credit_freeze", "fraud_alert", "address_discrepancy"],
+        avg_latency_ms: 0,
+        success_rate: 0,
+        cost_per_call: 0.35,
+        calls_today: 0,
+        last_sync_at: null,
+        config: { subscriber_code_set: false },
+    },
+];
+
+let cachedSignalProviders: SignalProvider[] | null = null;
+
+export function getSignalProviders(systemId: string, forceRefresh = false): SignalProvider[] {
+    if (!cachedSignalProviders || forceRefresh) {
+        cachedSignalProviders = SIGNAL_PROVIDER_TEMPLATES.map((template) => ({
+            ...template,
+            id: `sp_${generateId()}`,
+            decision_system_id: systemId,
+        }));
+    }
+    return cachedSignalProviders;
+}
+
+export function updateSignalProvider(providerId: string, updates: Partial<SignalProvider>): SignalProvider | undefined {
+    if (!cachedSignalProviders) return undefined;
+    const idx = cachedSignalProviders.findIndex(p => p.id === providerId);
+    if (idx === -1) return undefined;
+
+    cachedSignalProviders[idx] = {
+        ...cachedSignalProviders[idx],
+        ...updates,
+    };
+    return cachedSignalProviders[idx];
+}
+
+// ============================================
+// AUTOMATION SETTINGS
+// ============================================
+
+let cachedAutomationSettings: FraudAutomationSettings | null = null;
+
+export function getAutomationSettings(systemId: string): FraudAutomationSettings {
+    if (!cachedAutomationSettings) {
+        cachedAutomationSettings = {
+            decision_system_id: systemId,
+            auto_assign_enabled: true,
+            assignment_strategy: "load_balanced",
+            max_cases_per_analyst: 25,
+            auto_approve_below_score: 200,
+            auto_decline_above_score: 900,
+            auto_decision_enabled: true,
+            escalation_timeout_minutes: 60,
+            auto_escalate_on_timeout: true,
+            notify_on_critical: true,
+            notify_on_sla_breach: true,
+            notification_channels: ["email", "slack"],
+            batch_review_enabled: true,
+            batch_size_limit: 50,
+        };
+    }
+    return cachedAutomationSettings;
+}
+
+export function updateAutomationSettings(
+    systemId: string,
+    updates: Partial<FraudAutomationSettings>
+): FraudAutomationSettings {
+    const current = getAutomationSettings(systemId);
+    cachedAutomationSettings = {
+        ...current,
+        ...updates,
+        decision_system_id: systemId,
+    };
+    return cachedAutomationSettings;
 }
