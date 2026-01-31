@@ -112,3 +112,91 @@ export interface DecisionStats {
         approval_rate: number;
     }[];
 }
+
+// Fraud Management Types
+
+export type FraudRiskLevel = "critical" | "high" | "medium" | "low";
+export type FraudCaseStatus = "pending" | "in_review" | "escalated" | "resolved";
+export type FraudCaseOutcome = "approved" | "declined" | "escalated" | "timeout" | null;
+export type FraudSignalType = "device" | "velocity" | "identity" | "behavioral";
+export type VerificationType = "kba" | "otp" | "document" | "call";
+export type VerificationStatus = "pending" | "sent" | "completed" | "failed" | "expired";
+
+export interface FraudSignal {
+    id: string;
+    signal_type: FraudSignalType;
+    signal_name: string;
+    description: string;
+    raw_value: string | number;
+    risk_contribution: number; // 0-100
+    triggered_at: string;
+}
+
+export interface FraudScore {
+    id: string;
+    application_id: string;
+    decision_system_id: string;
+    score: number; // 0-1000
+    risk_level: FraudRiskLevel;
+    reason_codes: FraudSignal[];
+    model_version: string;
+    scored_at: string;
+}
+
+export interface FraudCase {
+    id: string;
+    application_id: string;
+    applicant_name: string;
+    applicant_email: string;
+    amount_requested: number;
+    fraud_score: FraudScore;
+    queue: FraudRiskLevel;
+    status: FraudCaseStatus;
+    assigned_to: string | null;
+    outcome: FraudCaseOutcome;
+    resolution_notes: string | null;
+    created_at: string;
+    resolved_at: string | null;
+    sla_deadline: string;
+}
+
+export interface VerificationRequest {
+    id: string;
+    case_id: string;
+    verification_type: VerificationType;
+    status: VerificationStatus;
+    result: "pass" | "fail" | "inconclusive" | null;
+    attempts: number;
+    sent_at: string | null;
+    completed_at: string | null;
+    expires_at: string;
+}
+
+export interface FraudAnalytics {
+    cases_today: number;
+    cases_pending: number;
+    sla_compliance: number; // percentage
+    approval_rate: number; // percentage
+    avg_review_time_minutes: number;
+    queue_depth: {
+        critical: number;
+        high: number;
+        medium: number;
+        low: number;
+    };
+    daily_trend: {
+        date: string;
+        total: number;
+        approved: number;
+        declined: number;
+    }[];
+    score_distribution: {
+        range: string;
+        count: number;
+    }[];
+    top_signals: {
+        signal_name: string;
+        trigger_count: number;
+        avg_risk_contribution: number;
+    }[];
+}

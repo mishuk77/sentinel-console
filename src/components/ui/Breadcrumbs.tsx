@@ -14,6 +14,9 @@ const routeLabels: Record<string, string> = {
     models: "Model Registry",
     policy: "Policy Configuration",
     exposure: "Exposure Control",
+    fraud: "Fraud Management",
+    queue: "Case Queue",
+    cases: "Case Detail",
     deployments: "Integration",
     decisions: "Decisions",
     systems: "Decision Systems",
@@ -56,6 +59,39 @@ export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
                     label: `Model ${modelId.slice(0, 8)}...`,
                     href: undefined // Current page
                 });
+            } else if (pageSegment === "fraud") {
+                // Handle nested fraud routes
+                const subSegment = pathSegments[systemIndex + 2];
+
+                if (subSegment === "queue") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: routeLabels.queue,
+                        href: undefined
+                    });
+                } else if (subSegment === "cases") {
+                    const caseId = pathSegments[systemIndex + 3];
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: routeLabels.queue,
+                        href: `/systems/${systemId}/fraud/queue`
+                    });
+                    items.push({
+                        label: caseId ? `Case ${caseId.slice(0, 8)}...` : "Case Detail",
+                        href: undefined
+                    });
+                } else {
+                    items.push({
+                        label: pageLabel,
+                        href: undefined
+                    });
+                }
             } else {
                 items.push({
                     label: pageLabel,
