@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type DecisionSystem } from "@/lib/api";
-import { Plus, Server, ArrowRight, Clock, Shield, Trash2 } from "lucide-react";
+import { Plus, Server, ArrowRight, Clock, Shield, Trash2, AlertCircle } from "lucide-react";
 // import { cn } from "@/lib/utils";
 
 export default function DecisionSystems() {
@@ -11,13 +11,17 @@ export default function DecisionSystems() {
     const [newName, setNewName] = useState("");
     const [newDesc, setNewDesc] = useState("");
 
-    const { data: systems, isLoading } = useQuery<DecisionSystem[]>({
+    const { data: systems, isLoading, isError, error, refetch } = useQuery<DecisionSystem[]>({
         queryKey: ["systems"],
         queryFn: async () => {
             const res = await api.get("/systems/");
             return res.data;
-        }
+        },
+        retry: 1,
+        retryDelay: 1000,
     });
+
+    const [createError, setCreateError] = useState<string | null>(null);
 
     const createMutation = useMutation({
         mutationFn: async () => {
@@ -29,6 +33,15 @@ export default function DecisionSystems() {
             setIsCreating(false);
             setNewName("");
             setNewDesc("");
+            setCreateError(null);
+        },
+        onError: (err) => {
+            const axiosError = err as { response?: { data?: { detail?: string } }; code?: string; message?: string };
+            if (axiosError?.code === "ERR_NETWORK") {
+                setCreateError("Cannot connect to API server. Is the backend running?");
+            } else {
+                setCreateError(axiosError?.response?.data?.detail || axiosError?.message || "Failed to create system");
+            }
         }
     });
 
@@ -46,6 +59,35 @@ export default function DecisionSystems() {
     });
 
     if (isLoading) return <div className="p-12 text-center text-muted-foreground">Loading systems...</div>;
+
+    if (isError) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        const axiosError = error as { response?: { status: number; data?: { detail?: string } }; code?: string };
+
+        return (
+            <div className="p-12 max-w-xl mx-auto">
+                <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl p-6 text-center">
+                    <h2 className="text-lg font-semibold text-red-800 dark:text-red-200 mb-2">
+                        Failed to Load Systems
+                    </h2>
+                    <p className="text-sm text-red-600 dark:text-red-400 mb-4">
+                        {axiosError?.code === "ERR_NETWORK"
+                            ? "Cannot connect to the API server. Please ensure the backend is running."
+                            : axiosError?.response?.data?.detail || errorMessage}
+                    </p>
+                    <p className="text-xs text-red-500 dark:text-red-500 mb-4 font-mono">
+                        API URL: {import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}
+                    </p>
+                    <button
+                        onClick={() => refetch()}
+                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                        Retry
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in zoom-in-95">
@@ -88,9 +130,15 @@ export default function DecisionSystems() {
                                 onChange={(e) => setNewDesc(e.target.value)}
                             />
                         </div>
+                        {createError && (
+                            <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md text-red-700 dark:text-red-300 text-sm">
+                                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                                {createError}
+                            </div>
+                        )}
                         <div className="flex gap-2 justify-end pt-2">
                             <button
-                                onClick={() => setIsCreating(false)}
+                                onClick={() => { setIsCreating(false); setCreateError(null); }}
                                 className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
                             >
                                 Cancel
