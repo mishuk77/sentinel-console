@@ -14,9 +14,25 @@ const routeLabels: Record<string, string> = {
     models: "Model Registry",
     policy: "Policy Configuration",
     exposure: "Exposure Control",
+    fraud: "Fraud Management",
+    queue: "Case Queue",
+    cases: "Case Detail",
+    rules: "Rules",
+    signals: "Signal Providers",
+    settings: "Automation Settings",
     deployments: "Integration",
     decisions: "Decisions",
     systems: "Decision Systems",
+};
+
+// Labels for fraud sub-routes when "models" is under fraud context
+const fraudSubLabels: Record<string, string> = {
+    queue: "Case Queue",
+    cases: "Case Detail",
+    rules: "Rules",
+    models: "ML Models",
+    signals: "Signal Providers",
+    settings: "Automation Settings",
 };
 
 export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
@@ -56,6 +72,75 @@ export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
                     label: `Model ${modelId.slice(0, 8)}...`,
                     href: undefined // Current page
                 });
+            } else if (pageSegment === "fraud") {
+                // Handle nested fraud routes
+                const subSegment = pathSegments[systemIndex + 2];
+
+                if (subSegment === "queue") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: routeLabels.queue,
+                        href: undefined
+                    });
+                } else if (subSegment === "cases") {
+                    const caseId = pathSegments[systemIndex + 3];
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: routeLabels.queue,
+                        href: `/systems/${systemId}/fraud/queue`
+                    });
+                    items.push({
+                        label: caseId ? `Case ${caseId.slice(0, 8)}...` : "Case Detail",
+                        href: undefined
+                    });
+                } else if (subSegment === "rules") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: fraudSubLabels.rules,
+                        href: undefined
+                    });
+                } else if (subSegment === "models") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: fraudSubLabels.models,
+                        href: undefined
+                    });
+                } else if (subSegment === "signals") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: fraudSubLabels.signals,
+                        href: undefined
+                    });
+                } else if (subSegment === "settings") {
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: fraudSubLabels.settings,
+                        href: undefined
+                    });
+                } else {
+                    items.push({
+                        label: pageLabel,
+                        href: undefined
+                    });
+                }
             } else {
                 items.push({
                     label: pageLabel,

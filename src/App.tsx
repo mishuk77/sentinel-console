@@ -10,6 +10,13 @@ import ModelDetail from "@/pages/ModelDetail";
 import Deployments from "@/pages/Deployments";
 import Policy from "@/pages/Policy";
 import ExposureControl from "@/pages/ExposureControl";
+import FraudDashboard from "@/pages/FraudDashboard";
+import FraudQueue from "@/pages/FraudQueue";
+import FraudCaseDetail from "@/pages/FraudCaseDetail";
+import FraudRules from "@/pages/FraudRules";
+import FraudModels from "@/pages/FraudModels";
+import FraudSignals from "@/pages/FraudSignals";
+import FraudSettings from "@/pages/FraudSettings";
 import Decisions from "@/pages/Decisions";
 import DecisionSystems from "@/pages/DecisionSystems";
 import SystemLayout from "@/pages/SystemLayout";
@@ -51,6 +58,13 @@ function App() {
                 <Route path="models/:id" element={<ModelDetail />} />
                 <Route path="policy" element={<Policy />} />
                 <Route path="exposure" element={<ExposureControl />} />
+                <Route path="fraud" element={<FraudDashboard />} />
+                <Route path="fraud/queue" element={<FraudQueue />} />
+                <Route path="fraud/cases/:caseId" element={<FraudCaseDetail />} />
+                <Route path="fraud/rules" element={<FraudRules />} />
+                <Route path="fraud/models" element={<FraudModels />} />
+                <Route path="fraud/signals" element={<FraudSignals />} />
+                <Route path="fraud/settings" element={<FraudSettings />} />
                 <Route path="deployments" element={<Deployments />} />
               </Route>
 
