@@ -61,11 +61,20 @@ export interface Policy {
     created_at?: string;
 }
 
+export type SystemModule =
+    | "credit_scoring"
+    | "policy_engine"
+    | "fraud_detection"
+    | "exposure_control";
+
 export interface DecisionSystem {
     id: string;
     name: string;
     description?: string;
     created_at: string;
+
+    // Enabled modules
+    enabled_modules: SystemModule[];
 
     // Active pointers
     active_model_id?: string;

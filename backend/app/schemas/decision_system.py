@@ -1,6 +1,20 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
+
+SystemModule = Literal[
+    "credit_scoring",
+    "policy_engine",
+    "fraud_detection",
+    "exposure_control",
+]
+
+MODULE_DEPENDENCIES: dict[str, list[str]] = {
+    "credit_scoring": [],
+    "policy_engine": ["credit_scoring"],
+    "fraud_detection": [],
+    "exposure_control": ["policy_engine"],
+}
 
 
 class DecisionSystemBase(BaseModel):
@@ -13,7 +27,20 @@ class DecisionSystemBase(BaseModel):
 class DecisionSystemCreate(DecisionSystemBase):
     """Schema for creating a DecisionSystem."""
 
-    pass
+    enabled_modules: list[SystemModule] = ["credit_scoring", "policy_engine"]
+
+    @field_validator("enabled_modules")
+    @classmethod
+    def validate_modules(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("At least one module must be enabled")
+        for mod in v:
+            for dep in MODULE_DEPENDENCIES.get(mod, []):
+                if dep not in v:
+                    raise ValueError(
+                        f"Module '{mod}' requires '{dep}' to be enabled"
+                    )
+        return v
 
 
 class DecisionSystemUpdate(BaseModel):
@@ -21,6 +48,22 @@ class DecisionSystemUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
+    enabled_modules: Optional[list[SystemModule]] = None
+
+    @field_validator("enabled_modules")
+    @classmethod
+    def validate_modules(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        if not v:
+            raise ValueError("At least one module must be enabled")
+        for mod in v:
+            for dep in MODULE_DEPENDENCIES.get(mod, []):
+                if dep not in v:
+                    raise ValueError(
+                        f"Module '{mod}' requires '{dep}' to be enabled"
+                    )
+        return v
 
 
 class ActiveModelSummary(BaseModel):
@@ -46,6 +89,7 @@ class DecisionSystemResponse(DecisionSystemBase):
 
     id: str
     created_at: datetime
+    enabled_modules: list[str] = []
     active_model_id: Optional[str] = None
     active_policy_id: Optional[str] = None
     active_model_summary: Optional[ActiveModelSummary] = None
