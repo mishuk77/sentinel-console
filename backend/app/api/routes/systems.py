@@ -31,6 +31,7 @@ async def create_system(
     system = DecisionSystem(
         name=system_in.name,
         description=system_in.description,
+        enabled_modules=system_in.enabled_modules,
     )
     db.add(system)
     await db.commit()

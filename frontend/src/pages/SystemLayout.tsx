@@ -2,9 +2,10 @@ import { Outlet, NavLink, useParams, Link, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query";
 import { api, type DecisionSystem } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
-import { LayoutDashboard, Database, BrainCircuit, Shield, ArrowLeft, Globe, Settings as Sliders, LogOut, DollarSign, ShieldAlert } from "lucide-react";
+import { LayoutDashboard, ArrowLeft, Globe, LogOut, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
+import { buildNavItems, type SystemModule } from "@/lib/modules";
 
 export default function SystemLayout() {
     const { systemId } = useParams<{ systemId: string }>();
@@ -28,15 +29,14 @@ export default function SystemLayout() {
     if (isLoading) return <div className="p-12 text-center text-muted-foreground">Loading system context...</div>;
     if (!system) return <div className="p-12 text-center text-red-500">System not found</div>;
 
+    // Build navigation dynamically from enabled modules
+    const moduleNavItems = buildNavItems(systemId!, system.enabled_modules as SystemModule[] | undefined);
+
     const navItems = [
         { to: `/systems/${systemId}/overview`, icon: LayoutDashboard, label: "Overview" },
-        { to: `/systems/${systemId}/data`, icon: Database, label: "Data" },
-        { to: `/systems/${systemId}/training`, icon: BrainCircuit, label: "Training Runs" },
-        { to: `/systems/${systemId}/models`, icon: Shield, label: "Models" },
-        { to: `/systems/${systemId}/policy`, icon: Sliders, label: "Policy" },
-        { to: `/systems/${systemId}/exposure`, icon: DollarSign, label: "Exposure Control" },
-        { to: `/systems/${systemId}/fraud`, icon: ShieldAlert, label: "Fraud Management" },
+        ...moduleNavItems,
         { to: `/systems/${systemId}/deployments`, icon: Globe, label: "Integration" },
+        { to: `/systems/${systemId}/modules`, icon: Settings, label: "Modules" },
     ];
 
     return (

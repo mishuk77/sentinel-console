@@ -21,10 +21,12 @@ import Decisions from "@/pages/Decisions";
 import DecisionSystems from "@/pages/DecisionSystems";
 import SystemLayout from "@/pages/SystemLayout";
 import SystemOverview from "@/pages/SystemOverview";
+import SystemModules from "@/pages/SystemModules";
 import Login from "@/pages/Login";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { Navigate } from "react-router-dom";
+import ModuleGuard from "@/components/ModuleGuard";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -51,21 +53,83 @@ function App() {
 
               {/* Scoped System Routes */}
               <Route path="/systems/:systemId" element={<SystemLayout />}>
+                {/* Always accessible */}
                 <Route path="overview" element={<SystemOverview />} />
-                <Route path="data" element={<Datasets />} />
-                <Route path="training" element={<TrainingJobs />} />
-                <Route path="models" element={<Models />} />
-                <Route path="models/:id" element={<ModelDetail />} />
-                <Route path="policy" element={<Policy />} />
-                <Route path="exposure" element={<ExposureControl />} />
-                <Route path="fraud" element={<FraudDashboard />} />
-                <Route path="fraud/queue" element={<FraudQueue />} />
-                <Route path="fraud/cases/:caseId" element={<FraudCaseDetail />} />
-                <Route path="fraud/rules" element={<FraudRules />} />
-                <Route path="fraud/models" element={<FraudModels />} />
-                <Route path="fraud/signals" element={<FraudSignals />} />
-                <Route path="fraud/settings" element={<FraudSettings />} />
+                <Route path="modules" element={<SystemModules />} />
                 <Route path="deployments" element={<Deployments />} />
+
+                {/* Credit Scoring Module Routes */}
+                <Route path="data" element={
+                  <ModuleGuard module="credit_scoring">
+                    <Datasets />
+                  </ModuleGuard>
+                } />
+                <Route path="training" element={
+                  <ModuleGuard module="credit_scoring">
+                    <TrainingJobs />
+                  </ModuleGuard>
+                } />
+                <Route path="models" element={
+                  <ModuleGuard module="credit_scoring">
+                    <Models />
+                  </ModuleGuard>
+                } />
+                <Route path="models/:id" element={
+                  <ModuleGuard module="credit_scoring">
+                    <ModelDetail />
+                  </ModuleGuard>
+                } />
+
+                {/* Policy Engine Routes */}
+                <Route path="policy" element={
+                  <ModuleGuard module="policy_engine">
+                    <Policy />
+                  </ModuleGuard>
+                } />
+
+                {/* Exposure Control Routes */}
+                <Route path="exposure" element={
+                  <ModuleGuard module="exposure_control">
+                    <ExposureControl />
+                  </ModuleGuard>
+                } />
+
+                {/* Fraud Detection Routes */}
+                <Route path="fraud" element={
+                  <ModuleGuard module="fraud_detection">
+                    <FraudDashboard />
+                  </ModuleGuard>
+                } />
+                <Route path="fraud/queue" element={
+                  <ModuleGuard module="fraud_detection">
+                    <FraudQueue />
+                  </ModuleGuard>
+                } />
+                <Route path="fraud/cases/:caseId" element={
+                  <ModuleGuard module="fraud_detection">
+                    <FraudCaseDetail />
+                  </ModuleGuard>
+                } />
+                <Route path="fraud/rules" element={
+                  <ModuleGuard module="fraud_detection">
+                    <FraudRules />
+                  </ModuleGuard>
+                } />
+                <Route path="fraud/models" element={
+                  <ModuleGuard module="fraud_detection">
+                    <FraudModels />
+                  </ModuleGuard>
+                } />
+                <Route path="fraud/signals" element={
+                  <ModuleGuard module="fraud_detection">
+                    <FraudSignals />
+                  </ModuleGuard>
+                } />
+                <Route path="fraud/settings" element={
+                  <ModuleGuard module="fraud_detection">
+                    <FraudSettings />
+                  </ModuleGuard>
+                } />
               </Route>
 
               {/* Global Decisions */}

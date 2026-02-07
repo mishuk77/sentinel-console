@@ -1,29 +1,14 @@
 import { Link, useLocation, useParams } from "react-router-dom";
 import { ChevronRight, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getRouteLabels } from "@/lib/modules";
 
 interface BreadcrumbsProps {
     systemName?: string;
 }
 
-// Map route segments to display names
-const routeLabels: Record<string, string> = {
-    overview: "Overview",
-    data: "Datasets",
-    training: "Training Jobs",
-    models: "Model Registry",
-    policy: "Policy Configuration",
-    exposure: "Exposure Control",
-    fraud: "Fraud Management",
-    queue: "Case Queue",
-    cases: "Case Detail",
-    rules: "Rules",
-    signals: "Signal Providers",
-    settings: "Automation Settings",
-    deployments: "Integration",
-    decisions: "Decisions",
-    systems: "Decision Systems",
-};
+// Get route labels from module registry (plus additional mappings)
+const routeLabels = getRouteLabels();
 
 // Labels for fraud sub-routes when "models" is under fraud context
 const fraudSubLabels: Record<string, string> = {
