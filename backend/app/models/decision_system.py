@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Text
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.session import Base
 import uuid
@@ -35,3 +36,9 @@ class DecisionSystem(Base):
     # Active pointers (foreign keys to be added when those tables exist)
     active_model_id = Column(String(50), nullable=True)
     active_policy_id = Column(String(50), nullable=True)
+
+    # Relationships
+    ml_models = relationship("MLModel", back_populates="decision_system", cascade="all, delete-orphan")
+    policies = relationship("Policy", back_populates="decision_system", cascade="all, delete-orphan")
+    exposure_limits = relationship("ExposureLimit", back_populates="decision_system", cascade="all, delete-orphan")
+    audit_logs = relationship("AuditLog", back_populates="decision_system", cascade="all, delete-orphan")
