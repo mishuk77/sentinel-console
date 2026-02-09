@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type DecisionSystem, type SystemModule } from "@/lib/api";
+import { api, API_BASE_URL, type DecisionSystem, type SystemModule } from "@/lib/api";
 import { MODULE_REGISTRY } from "@/lib/modules";
 import { Plus, Server, ArrowRight, Clock, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -77,7 +77,7 @@ export default function DecisionSystems() {
                             : axiosError?.response?.data?.detail || errorMessage}
                     </p>
                     <p className="text-xs text-red-500 dark:text-red-500 mb-4 font-mono">
-                        API URL: {import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}
+                        API URL: {API_BASE_URL}
                     </p>
                     <button
                         onClick={() => refetch()}
