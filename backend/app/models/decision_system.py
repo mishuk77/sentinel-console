@@ -42,3 +42,4 @@ class DecisionSystem(Base):
     policies = relationship("Policy", back_populates="decision_system", cascade="all, delete-orphan")
     exposure_limits = relationship("ExposureLimit", back_populates="decision_system", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="decision_system", cascade="all, delete-orphan")
+    datasets = relationship("Dataset", back_populates="decision_system", cascade="all, delete-orphan")

@@ -3,6 +3,8 @@ from app.models.ml_model import MLModel, ModelStatus, ModuleType
 from app.models.policy import Policy, PolicyStatus
 from app.models.exposure_limit import ExposureLimit, LimitStatus, LimitType
 from app.models.audit_log import AuditLog, AuditAction, EntityType
+from app.models.user import User
+from app.models.dataset import Dataset, DatasetStatus
 
 __all__ = [
     "DecisionSystem",
@@ -17,4 +19,7 @@ __all__ = [
     "AuditLog",
     "AuditAction",
     "EntityType",
+    "User",
+    "Dataset",
+    "DatasetStatus",
 ]

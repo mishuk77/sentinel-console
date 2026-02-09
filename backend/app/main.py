@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.api.routes import api_router
 from app.db.session import engine, Base
 # Import all models to register them with Base.metadata before create_all
-from app.models import DecisionSystem, MLModel, Policy, ExposureLimit, AuditLog  # noqa: F401
+from app.models import DecisionSystem, MLModel, Policy, ExposureLimit, AuditLog, User, Dataset  # noqa: F401
 
 
 @asynccontextmanager
