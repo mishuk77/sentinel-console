@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { MLModel } from "@/lib/api";
-import { api } from "@/lib/api";
+import { api, API_BASE_URL } from "@/lib/api";
 import { Terminal, Server, ShieldCheck, Copy, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useParams } from "react-router-dom";
@@ -34,7 +34,7 @@ export default function Deployments() {
     // Default to active model if none selected
     const modelToDisplay = models?.find(m => m.id === selectedModelId) || activeModel || (models && models.length > 0 ? models[0] : undefined);
 
-    const baseUrl = "http://localhost:8000/api/v1";
+    const baseUrl = API_BASE_URL;
 
     const copyToClipboard = (text: string, key: string) => {
         navigator.clipboard.writeText(text);
