@@ -57,15 +57,22 @@ def startup_event():
                 conn.commit()
             print("MIGRATION: 'module_type' column added.")
 
-    # MANUAL MIGRATION CHECK: system_type in decision_systems
+    # MANUAL MIGRATION CHECK: decision_systems columns
     if "decision_systems" in inspector.get_table_names():
         columns = [c["name"] for c in inspector.get_columns("decision_systems")]
-        if "system_type" not in columns:
-            print("MIGRATION: Adding 'system_type' to decision_systems table...")
-            with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE decision_systems ADD COLUMN system_type VARCHAR DEFAULT 'full'"))
-                conn.commit()
-            print("MIGRATION: 'system_type' column added.")
+        ds_migrations = {
+            "system_type": "VARCHAR DEFAULT 'full'",
+            "active_model_id": "VARCHAR",
+            "active_fraud_model_id": "VARCHAR",
+            "active_policy_id": "VARCHAR",
+        }
+        for col_name, col_type in ds_migrations.items():
+            if col_name not in columns:
+                print(f"MIGRATION: Adding '{col_name}' to decision_systems table...")
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE decision_systems ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                print(f"MIGRATION: '{col_name}' column added.")
 
     Base.metadata.create_all(bind=engine)
     print("Database schema initialized.")
