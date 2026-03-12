@@ -188,7 +188,7 @@ export default function FraudTiers() {
                                 />
                                 <Tooltip
                                     contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
-                                    formatter={(value: number) => [`${value.toFixed(2)}%`, "Fraud Rate"]}
+                                    formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(2)}%`, "Fraud Rate"]}
                                     labelFormatter={(label) => `Decile ${label} — ${getTierForDecile(label, maxDecile)} Risk`}
                                 />
                                 <Bar dataKey="fraud_rate" radius={[3, 3, 0, 0]} fillOpacity={0.85}

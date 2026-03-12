@@ -8,7 +8,7 @@ import {
     Scale, Check, AlertTriangle, Trash2, AlertCircle, X, ArrowRight,
     CheckCircle, Layers, Plus, ChevronRight, ChevronLeft, RefreshCw, Info
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea, ComposedChart, Line, ReferenceLine } from "recharts";
+import { Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea, ComposedChart, Line, ReferenceLine } from "recharts";
 import { cn } from "@/lib/utils";
 
 

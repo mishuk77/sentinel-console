@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { ShieldAlert, Activity, Target, BarChart2, ArrowRight, BrainCircuit } from "lucide-react";
+import { ShieldAlert, Activity, Target, ArrowRight, BrainCircuit } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function FraudOverview() {
@@ -148,7 +148,7 @@ export default function FraudOverview() {
                                     tickLine={false} axisLine={false} />
                                 <Tooltip
                                     contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
-                                    formatter={(value: number) => [`${value.toFixed(2)}%`, "Fraud Rate"]}
+                                    formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(2)}%`, "Fraud Rate"]}
                                     labelFormatter={(l) => `Decile ${l}`}
                                 />
                                 <Bar dataKey="fraud_rate" fill="hsl(0,68%,52%)" fillOpacity={0.75} radius={[3, 3, 0, 0]} />

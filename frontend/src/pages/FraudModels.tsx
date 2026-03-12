@@ -4,7 +4,7 @@ import type { MLModel } from "@/lib/api";
 import { api, modelsAPI } from "@/lib/api";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { Trophy, BarChart2, X, Trash2, AlertCircle, GitCompare, Check, Rocket, HelpCircle, CheckCircle, ShieldAlert, ArrowRight, Sliders } from "lucide-react";
+import { Trophy, BarChart2, X, Trash2, AlertCircle, GitCompare, Check, Rocket, HelpCircle, CheckCircle, ShieldAlert, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const COMPARISON_COLORS = [

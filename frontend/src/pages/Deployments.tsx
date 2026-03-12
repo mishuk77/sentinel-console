@@ -5,13 +5,11 @@ import { api, API_BASE_URL } from "@/lib/api";
 import { Terminal, ShieldCheck, Copy, Check, Globe, CreditCard, ShieldAlert, Zap, Play, Loader2, Calculator, X, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useParams } from "react-router-dom";
-import { useSystem } from "@/lib/hooks";
 
 type CommandType = "curl" | "powershell" | "python";
 
 export default function Deployments() {
     const { systemId } = useParams<{ systemId: string }>();
-    const { system } = useSystem();
     const queryClient = useQueryClient();
     const [copied, setCopied] = useState<string | null>(null);
     const [commandType, setCommandType] = useState<CommandType>("curl");

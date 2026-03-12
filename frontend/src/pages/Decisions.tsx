@@ -127,13 +127,6 @@ export default function Decisions() {
         }
     };
 
-    const SortIcon = ({ field }: { field: SortField }) => {
-        if (sortField !== field) return <ArrowUpDown className="h-3 w-3 text-muted-foreground/40" />;
-        return sortDir === "asc"
-            ? <ArrowUp className="h-3 w-3 text-primary" />
-            : <ArrowDown className="h-3 w-3 text-primary" />;
-    };
-
     const systemName = (id: string) => systems?.find(s => s.id === id)?.name || id?.slice(0, 8);
 
     return (

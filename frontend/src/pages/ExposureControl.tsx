@@ -11,7 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
     ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
-    Tooltip, Legend, ResponsiveContainer, Cell, ReferenceLine
+    Tooltip, Legend, ResponsiveContainer, Cell
 } from "recharts";
 
 const CHART_GREEN  = "hsl(142,68%,40%)";
@@ -581,7 +581,7 @@ export default function ExposureControl() {
                                         borderRadius: "var(--radius)",
                                         fontSize: "11px"
                                     }}
-                                    formatter={(value: any, name: string) => {
+                                    formatter={(value: any, name?: string) => {
                                         if (name === "Bad Rate") return [`${value}%`, name];
                                         if (name === "Limit") return [`$${Number(value).toLocaleString()}`, name];
                                         return [value, name];
