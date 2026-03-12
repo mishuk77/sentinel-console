@@ -1,5 +1,5 @@
-import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import React, { useEffect } from "react";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "@/components/layout/Layout";
 import Dashboard from "@/pages/Dashboard";
@@ -10,23 +10,57 @@ import ModelDetail from "@/pages/ModelDetail";
 import Deployments from "@/pages/Deployments";
 import Policy from "@/pages/Policy";
 import ExposureControl from "@/pages/ExposureControl";
-import FraudDashboard from "@/pages/FraudDashboard";
-import FraudQueue from "@/pages/FraudQueue";
-import FraudCaseDetail from "@/pages/FraudCaseDetail";
-import FraudRules from "@/pages/FraudRules";
+import FraudOverview from "@/pages/FraudOverview";
+import FraudData from "@/pages/FraudData";
+import FraudTraining from "@/pages/FraudTraining";
 import FraudModels from "@/pages/FraudModels";
-import FraudSignals from "@/pages/FraudSignals";
-import FraudSettings from "@/pages/FraudSettings";
+import FraudTiers from "@/pages/FraudTiers";
+import Monitoring from "@/pages/Monitoring";
 import Decisions from "@/pages/Decisions";
 import DecisionSystems from "@/pages/DecisionSystems";
 import SystemLayout from "@/pages/SystemLayout";
 import SystemOverview from "@/pages/SystemOverview";
-import SystemModules from "@/pages/SystemModules";
 import Login from "@/pages/Login";
 import { AuthProvider, useAuth } from "@/lib/AuthContext";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { Navigate } from "react-router-dom";
 import ModuleGuard from "@/components/ModuleGuard";
+
+const ROUTE_TITLES: [RegExp, string][] = [
+  [/^\/login$/,                          "Sign In"],
+  [/^\/$/,                               "Dashboard"],
+  [/^\/systems$/,                        "Decision Systems"],
+  [/\/overview$/,                        "System Overview"],
+  [/\/deployments/,                      "Deployments"],
+  [/\/data$/,                            "Datasets"],
+  [/\/training$/,                        "Training"],
+  [/\/models\/[^/]+$/,                   "Model Detail"],
+  [/\/models$/,                          "Models"],
+  [/\/policy$/,                          "Policy Engine"],
+  [/\/exposure$/,                        "Exposure Control"],
+  [/\/monitoring$/,                      "Monitoring"],
+  [/\/fraud\/cases\/[^/]+$/,             "Case Detail"],
+  [/\/fraud\/queue$/,                    "Case Queue"],
+  [/\/fraud\/detection$/,                "Fraud Detection"],
+  [/\/fraud\/rules$/,                    "Fraud Rules"],
+  [/\/fraud\/models$/,                   "Fraud Models"],
+  [/\/fraud\/signals$/,                  "Fraud Signals"],
+  [/\/fraud\/tiers$/,                    "Risk Tiers"],
+  [/\/fraud\/operations$/,               "Operations"],
+  [/\/fraud\/workflow$/,                 "Review Workflow"],
+  [/\/fraud\/settings$/,                 "Fraud Settings"],
+  [/\/fraud\/data$/,                     "Fraud Data"],
+  [/^\/decisions$/,                      "Decisions"],
+];
+
+function TitleManager() {
+  const location = useLocation();
+  useEffect(() => {
+    const match = ROUTE_TITLES.find(([re]) => re.test(location.pathname));
+    document.title = match ? `${match[1]} · Sentinel` : "Sentinel";
+  }, [location.pathname]);
+  return null;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -42,6 +76,7 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <BrowserRouter>
+          <TitleManager />
           <Routes>
             <Route path="/login" element={<Login />} />
 
@@ -55,7 +90,6 @@ function App() {
               <Route path="/systems/:systemId" element={<SystemLayout />}>
                 {/* Always accessible */}
                 <Route path="overview" element={<SystemOverview />} />
-                <Route path="modules" element={<SystemModules />} />
                 <Route path="deployments" element={<Deployments />} />
 
                 {/* Credit Scoring Module Routes */}
@@ -94,25 +128,29 @@ function App() {
                   </ModuleGuard>
                 } />
 
-                {/* Fraud Detection Routes */}
-                <Route path="fraud" element={
+                {/* Monitoring */}
+                <Route path="monitoring" element={<Monitoring />} />
+
+                {/* Fraud Detection Module Routes */}
+                <Route path="fraud/overview" element={
                   <ModuleGuard module="fraud_detection">
-                    <FraudDashboard />
+                    <FraudOverview />
                   </ModuleGuard>
                 } />
-                <Route path="fraud/queue" element={
+                {/* Legacy redirect: fraud/detection → fraud/overview */}
+                <Route path="fraud/detection" element={
                   <ModuleGuard module="fraud_detection">
-                    <FraudQueue />
+                    <FraudOverview />
                   </ModuleGuard>
                 } />
-                <Route path="fraud/cases/:caseId" element={
+                <Route path="fraud/data" element={
                   <ModuleGuard module="fraud_detection">
-                    <FraudCaseDetail />
+                    <FraudData />
                   </ModuleGuard>
                 } />
-                <Route path="fraud/rules" element={
+                <Route path="fraud/training" element={
                   <ModuleGuard module="fraud_detection">
-                    <FraudRules />
+                    <FraudTraining />
                   </ModuleGuard>
                 } />
                 <Route path="fraud/models" element={
@@ -120,14 +158,9 @@ function App() {
                     <FraudModels />
                   </ModuleGuard>
                 } />
-                <Route path="fraud/signals" element={
+                <Route path="fraud/tiers" element={
                   <ModuleGuard module="fraud_detection">
-                    <FraudSignals />
-                  </ModuleGuard>
-                } />
-                <Route path="fraud/settings" element={
-                  <ModuleGuard module="fraud_detection">
-                    <FraudSettings />
+                    <FraudTiers />
                   </ModuleGuard>
                 } />
               </Route>

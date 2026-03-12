@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
-import { api } from "@/lib/api";
-import { Shield, Loader2, AlertCircle } from "lucide-react";
+import { authAPI } from "@/lib/api";
+import { Loader2, AlertCircle, ArrowRight } from "lucide-react";
 
 export default function Login() {
     const [email, setEmail] = useState("");
@@ -17,93 +17,135 @@ export default function Login() {
         e.preventDefault();
         setError("");
         setLoading(true);
-
         try {
-            const formData = new FormData();
-            formData.append("username", email);
-            formData.append("password", password);
-
-            const res = await api.post("/auth/login/access-token", formData, {
-                headers: { "Content-Type": "application/x-www-form-urlencoded" }
-            });
-
+            const res = await authAPI.login({ username: email, password });
             const { access_token, client_id, role } = res.data;
-            login(access_token, { client_id, role });
+            login(access_token, { client_id, role, email });
             navigate("/systems");
-
         } catch (err: any) {
-            console.error(err);
-            setError(err.response?.data?.detail || "Login failed. Check your credentials.");
+            setError(err.response?.data?.detail || "Invalid credentials. Please try again.");
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-background">
-            <div className="w-full max-w-md p-8 space-y-8 bg-card rounded-lg border shadow-sm">
-                <div className="text-center space-y-2">
-                    <div className="flex justify-center mb-4">
-                        <div className="h-12 w-12 bg-primary/10 rounded-full flex items-center justify-center">
-                            <Shield className="h-6 w-6 text-primary" />
-                        </div>
-                    </div>
-                    <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
-                    <p className="text-sm text-muted-foreground">
-                        Sign in to access your decision systems
-                    </p>
+        <div className="min-h-screen bg-background flex">
+            {/* Left panel — branding */}
+            <div className="hidden lg:flex lg:w-[420px] xl:w-[480px] bg-card border-r flex-col p-10 shrink-0">
+                {/* Logo */}
+                <div className="flex items-center gap-2.5">
+                    <img src="/sentinel.svg" alt="Sentinel" className="h-7 w-7" />
+                    <span className="font-bold text-base tracking-tight">Sentinel</span>
+                    <span className="text-2xs font-medium text-muted-foreground/60 border border-border rounded px-1.5 py-0.5 ml-0.5">
+                        CONSOLE
+                    </span>
                 </div>
 
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    {error && (
-                        <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-md flex items-center gap-2">
-                            <AlertCircle className="h-4 w-4" />
-                            {error}
+                {/* Main copy */}
+                <div className="mt-auto">
+                    <h1 className="text-3xl font-bold tracking-tight leading-snug mb-4">
+                        Decision intelligence<br />for financial services
+                    </h1>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-10 max-w-xs">
+                        Manage credit models, policy engines, fraud detection, and real-time decisioning from a single command center.
+                    </p>
+
+                    {/* Feature list */}
+                    <div className="space-y-3">
+                        {[
+                            ["Credit Scoring", "Train and deploy ML models with full audit trails"],
+                            ["Policy Engine", "Segment-level thresholds with confidence scoring"],
+                            ["Fraud Detection", "Real-time case management and rule orchestration"],
+                        ].map(([title, desc]) => (
+                            <div key={title} className="flex items-start gap-3">
+                                <div className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
+                                <div>
+                                    <p className="text-xs font-semibold">{title}</p>
+                                    <p className="text-2xs text-muted-foreground">{desc}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="mt-12 pt-6 border-t">
+                    <p className="text-2xs text-muted-foreground">
+                        Sentinel Decisions Platform · Enterprise Edition
+                    </p>
+                </div>
+            </div>
+
+            {/* Right panel — form */}
+            <div className="flex-1 flex items-center justify-center p-8">
+                <div className="w-full max-w-sm">
+                    {/* Mobile logo */}
+                    <div className="flex items-center gap-2 mb-10 lg:hidden">
+                        <img src="/sentinel.svg" alt="Sentinel" className="h-6 w-6" />
+                        <span className="font-bold text-sm">Sentinel</span>
+                    </div>
+
+                    <div className="mb-8">
+                        <h2 className="text-xl font-bold tracking-tight">Sign in</h2>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            Access your decision systems
+                        </p>
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        {error && (
+                            <div className="p-3 text-xs text-down bg-down/8 border border-down/20 rounded flex items-start gap-2">
+                                <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                                {error}
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="field-label" htmlFor="email">Email</label>
+                            <input
+                                id="email"
+                                type="email"
+                                placeholder="you@company.com"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="field-input"
+                                required
+                                autoFocus
+                            />
                         </div>
-                    )}
 
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium leading-none" htmlFor="email">
-                            Email
-                        </label>
-                        <input
-                            id="email"
-                            type="email"
-                            placeholder="admin@sentinel.com"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            required
-                        />
+                        <div>
+                            <label className="field-label" htmlFor="password">Password</label>
+                            <input
+                                id="password"
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="field-input"
+                                required
+                            />
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="btn-primary w-full mt-2"
+                        >
+                            {loading
+                                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Signing in…</>
+                                : <><ArrowRight className="h-3.5 w-3.5" /> Sign In</>
+                            }
+                        </button>
+                    </form>
+
+                    <div className="mt-8 pt-6 border-t">
+                        <p className="text-2xs text-muted-foreground">Demo credentials</p>
+                        <p className="text-xs font-mono text-muted-foreground mt-1">
+                            admin@sentineldecisions.com / admin123
+                        </p>
                     </div>
-
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium leading-none" htmlFor="password">
-                            Password
-                        </label>
-                        <input
-                            id="password"
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            required
-                        />
-                    </div>
-
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 w-full"
-                    >
-                        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Sign In
-                    </button>
-
-                    <div className="text-center text-xs text-muted-foreground">
-                        <p>Demo Credentials: admin@sentinel.com / admin123</p>
-                    </div>
-                </form>
+                </div>
             </div>
         </div>
     );

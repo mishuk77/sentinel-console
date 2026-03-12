@@ -1,83 +1,70 @@
-import { NavLink, Link } from "react-router-dom";
+import { NavLink, Link, useNavigate } from "react-router-dom";
 import {
     LayoutDashboard,
     Gavel,
-    ShieldCheck,
     Server,
     Activity,
     Sun,
     Moon,
-    Monitor
+    Monitor,
+    LogOut,
+    ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/ThemeContext";
+import { useAuth } from "@/lib/AuthContext";
 import { useState, useRef, useEffect } from "react";
 
 const navItems = [
-    { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-    { to: "/systems", icon: Server, label: "Decision Systems" },
-    { to: "/decisions", icon: Gavel, label: "Decisions" },
-    { to: "/monitoring", icon: Activity, label: "Monitoring" }, // Placeholder
+    { to: "/",          icon: LayoutDashboard, label: "Dashboard"        },
+    { to: "/systems",   icon: Server,          label: "Decision Systems" },
+    { to: "/decisions", icon: Gavel,           label: "Decisions"        },
+    { to: "/monitoring",icon: Activity,        label: "Monitoring"       },
 ];
 
 function ThemeToggle() {
     const { theme, setTheme, resolvedTheme } = useTheme();
     const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
+    const ref = useRef<HTMLDivElement>(null);
 
-    // Close dropdown when clicking outside
     useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-            }
-        }
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setIsOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
     }, []);
 
-    const themeOptions = [
-        { value: "light" as const, label: "Light", icon: Sun },
-        { value: "dark" as const, label: "Dark", icon: Moon },
+    const options = [
+        { value: "light"  as const, label: "Light",  icon: Sun     },
+        { value: "dark"   as const, label: "Dark",   icon: Moon    },
         { value: "system" as const, label: "System", icon: Monitor },
     ];
 
     return (
-        <div className="relative" ref={dropdownRef}>
+        <div className="relative" ref={ref}>
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className={cn(
-                    "p-2 rounded-lg transition-colors",
-                    "hover:bg-accent text-muted-foreground hover:text-foreground",
-                    "focus:outline-none focus:ring-2 focus:ring-primary/20"
-                )}
+                className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title={`Theme: ${theme}`}
             >
-                {resolvedTheme === "dark" ? (
-                    <Moon className="h-4 w-4" />
-                ) : (
-                    <Sun className="h-4 w-4" />
-                )}
+                {resolvedTheme === "dark" ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
             </button>
-
             {isOpen && (
-                <div className="absolute right-0 mt-2 w-36 bg-card border rounded-lg shadow-lg py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                    {themeOptions.map((option) => (
+                <div className="absolute right-0 mt-1.5 w-32 bg-popover border border-border rounded shadow-xl py-1 z-50">
+                    {options.map((o) => (
                         <button
-                            key={option.value}
-                            onClick={() => {
-                                setTheme(option.value);
-                                setIsOpen(false);
-                            }}
+                            key={o.value}
+                            onClick={() => { setTheme(o.value); setIsOpen(false); }}
                             className={cn(
-                                "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors",
-                                theme === option.value
-                                    ? "bg-primary/10 text-primary font-medium"
-                                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                                "w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors",
+                                theme === o.value
+                                    ? "text-primary font-medium bg-primary/8"
+                                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
                             )}
                         >
-                            <option.icon className="h-4 w-4" />
-                            {option.label}
+                            <o.icon className="h-3 w-3" />
+                            {o.label}
                         </button>
                     ))}
                 </div>
@@ -86,39 +73,106 @@ function ThemeToggle() {
     );
 }
 
+function UserMenu() {
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
+    const [isOpen, setIsOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const onMouse = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setIsOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setIsOpen(false); };
+        document.addEventListener("mousedown", onMouse);
+        document.addEventListener("keydown", onKey);
+        return () => { document.removeEventListener("mousedown", onMouse); document.removeEventListener("keydown", onKey); };
+    }, []);
+
+    const handleLogout = () => { logout(); navigate("/login"); };
+
+    const email = user?.email || "";
+    const initials = email ? email.slice(0, 2).toUpperCase() : (user?.role?.[0] || "U").toUpperCase();
+    const displayName = email || user?.role || "User";
+    const role = user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : "";
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className={cn(
+                    "flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded transition-colors",
+                    "hover:bg-accent focus:outline-none",
+                    isOpen && "bg-accent"
+                )}
+            >
+                <div className="h-6 w-6 rounded-sm bg-primary/15 border border-primary/25 flex items-center justify-center flex-shrink-0">
+                    <span className="text-2xs font-bold text-primary leading-none">{initials}</span>
+                </div>
+                <span className="text-xs font-medium text-foreground hidden sm:block max-w-28 truncate">{displayName}</span>
+                <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            </button>
+
+            {isOpen && (
+                <div className="absolute right-0 mt-1.5 w-52 bg-popover border border-border rounded shadow-xl py-1 z-50">
+                    <div className="px-3 py-2.5 border-b border-border">
+                        <p className="text-xs font-semibold text-foreground truncate">{displayName}</p>
+                        {role && <p className="text-2xs text-muted-foreground capitalize mt-0.5">{role}</p>}
+                    </div>
+                    <div className="py-1">
+                        <button
+                            onClick={handleLogout}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-down hover:bg-down/8 transition-colors"
+                        >
+                            <LogOut className="h-3.5 w-3.5" />
+                            Sign out
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function TopNav() {
     return (
-        <header className="h-16 border-b bg-card flex items-center px-6 sticky top-0 z-50">
-            <Link to="/" className="flex items-center mr-8">
-                <ShieldCheck className="h-6 w-6 text-primary mr-2" />
-                <span className="font-bold text-lg tracking-tight">Sentinel Console</span>
+        <header className="h-12 border-b border-border bg-card flex items-center px-5 sticky top-0 z-50 shrink-0">
+            {/* Logo */}
+            <Link to="/" className="flex items-center gap-2 mr-8 shrink-0">
+                <img src="/sentinel.svg" alt="Sentinel" className="h-5 w-5" />
+                <span className="font-semibold text-sm tracking-tight text-foreground">Sentinel</span>
+                <span className="hidden md:block text-2xs font-medium text-muted-foreground/60 border border-border rounded px-1.5 py-0.5 ml-1">
+                    CONSOLE
+                </span>
             </Link>
 
-            <nav className="flex items-center space-x-4">
+            {/* Primary nav */}
+            <nav className="flex items-center gap-0.5">
                 {navItems.map((item) => (
                     <NavLink
                         key={item.to}
                         to={item.to}
+                        end={item.to === "/"}
                         className={({ isActive }) =>
                             cn(
-                                "flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                                "flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors",
                                 isActive
                                     ? "text-primary bg-primary/10"
                                     : "text-muted-foreground hover:text-foreground hover:bg-accent"
                             )
                         }
                     >
-                        <item.icon className="h-4 w-4" />
+                        <item.icon className="h-3.5 w-3.5 shrink-0" />
                         {item.label}
                     </NavLink>
                 ))}
             </nav>
 
-            <div className="ml-auto flex items-center gap-4">
+            {/* Right controls */}
+            <div className="ml-auto flex items-center gap-1">
                 <ThemeToggle />
-                <span className="text-xs text-muted-foreground">
-                    v2.0 • Fintech OS
-                </span>
+                <div className="w-px h-4 bg-border mx-1" />
+                <UserMenu />
             </div>
         </header>
     );

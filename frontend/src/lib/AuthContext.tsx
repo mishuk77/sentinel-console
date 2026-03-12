@@ -3,7 +3,7 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 interface User {
     client_id: string;
     role: string;
-    // We could add email here if we returned it, but role/client_id is enough for now
+    email?: string;
 }
 
 interface AuthContextType {

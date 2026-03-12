@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Score Distribution — Quantile Bins + PAV</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0c0e14;
+    color: #cbd5e1;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 36px 24px 56px;
+    min-height: 100vh;
+    gap: 12px;
+  }
+
+  .page-header { text-align: center; margin-bottom: 4px; }
+  .page-header h1 { font-size: 15px; font-weight: 600; color: #f1f5f9; letter-spacing: -0.01em; }
+  .page-header p  { color: #475569; font-size: 11.5px; margin-top: 4px; }
+
+  .card {
+    background: #141720;
+    border: 1px solid #1e2436;
+    border-radius: 8px;
+    padding: 18px 20px;
+    width: 100%;
+    max-width: 900px;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .card-title {
+    font-size: 11px; font-weight: 600; color: #475569;
+    letter-spacing: 0.07em; text-transform: uppercase;
+  }
+
+  /* Clickable legend */
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .legend-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #64748b;
+    cursor: pointer;
+    padding: 3px 8px 3px 6px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .legend-item:hover { background: #1e2436; border-color: #2d3a52; color: #94a3b8; }
+  .legend-item.active { color: #94a3b8; }
+  .legend-item.muted  { opacity: 0.38; }
+  .swatch-bar  { width: 11px; height: 11px; border-radius: 2px; flex-shrink: 0; }
+  .swatch-line { width: 20px; height: 2.5px; border-radius: 99px; flex-shrink: 0; }
+
+  /* Chart */
+  .chart-wrap {
+    position: relative;
+    cursor: col-resize;
+    user-select: none;
+  }
+  canvas { position: absolute; top: 0; left: 0; display: block; }
+
+  .cutoff-line {
+    position: absolute; top: 0; width: 1.5px;
+    background: #f59e0b; pointer-events: none; z-index: 10;
+  }
+  .cutoff-handle {
+    position: absolute; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 13px; height: 13px;
+    background: #f59e0b; border: 2px solid #0c0e14;
+    border-radius: 50%; cursor: col-resize; z-index: 11; pointer-events: all;
+    box-shadow: 0 0 0 1px rgba(245,158,11,0.4);
+  }
+  .approve-shade, .reject-shade {
+    position: absolute; top: 0; pointer-events: none; z-index: 1;
+  }
+  .approve-shade { background: rgba(34,197,94,0.045); }
+  .reject-shade  { background: rgba(239,68,68,0.045); }
+
+  .bad-rate-line {
+    position: absolute; left: 0; right: 0; height: 0;
+    border-top: 1px dashed rgba(239,68,68,0.4);
+    pointer-events: none; z-index: 9;
+  }
+
+  /* Controls */
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .control-group {
+    display: flex; align-items: center; gap: 10px;
+    background: #0f1117; border: 1px solid #1e2436;
+    border-radius: 6px; padding: 8px 12px;
+  }
+  .ctrl-label { font-size: 10.5px; color: #475569; white-space: nowrap; flex-shrink: 0; }
+  input[type=range] {
+    flex: 1; accent-color: #f59e0b; cursor: pointer;
+    height: 3px;
+  }
+  .ctrl-val { font-size: 13px; font-weight: 600; color: #e2e8f0; width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Stats */
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 8px; margin-top: 10px;
+  }
+  .stat {
+    background: #0f1117; border: 1px solid #1e2436;
+    border-radius: 6px; padding: 10px 14px;
+  }
+  .stat-label {
+    font-size: 9.5px; color: #475569;
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 5px;
+  }
+  .stat-value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+  .c-blue  { color: #60a5fa; }
+  .c-green { color: #4ade80; }
+  .c-amber { color: #fbbf24; }
+  .c-red   { color: #f87171; }
+
+  /* PAV note */
+  .pav-note {
+    font-size: 10px; color: #334155; margin-top: 10px; line-height: 1.5;
+    padding: 7px 11px; background: #0f1117; border-radius: 5px;
+    border-left: 2px solid #1e2436;
+  }
+  .pav-note strong { color: #475569; }
+
+  .divider { width: 100%; max-width: 900px; height: 1px; background: transparent; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Score Distribution — Quantile Bins + PAV</h1>
+  <p>Empirical bad rates shown for transparency. PAV-smoothed values drive cutoff logic. Drag or use sliders.</p>
+</div>
+
+<!-- ── CHART 1 ── -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Risk Quality by Score Band</span>
+    <div class="legend" id="legend1">
+      <div class="legend-item active" data-ds="0">
+        <div class="swatch-bar" style="background:rgba(96,165,250,0.6)"></div>
+        Empirical bad rate
+      </div>
+      <div class="legend-item active" data-ds="1">
+        <div class="swatch-line" style="background:#f59e0b"></div>
+        PAV-smoothed
+      </div>
+      <div class="legend-item active" data-ds="2">
+        <div class="swatch-line" style="background:#f87171"></div>
+        Cumulative (approved book)
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-wrap" id="wrap1" style="height:272px;">
+    <div class="approve-shade" id="approve1"></div>
+    <div class="reject-shade"  id="reject1"></div>
+    <canvas id="chart1"></canvas>
+    <div class="bad-rate-line" id="bad-rate-line"></div>
+    <div class="cutoff-line" id="line1"><div class="cutoff-handle" id="handle1"></div></div>
+  </div>
+
+  <div class="controls">
+    <div class="control-group">
+      <span class="ctrl-label">Approval target</span>
+      <input type="range" id="sl-approval" min="1" max="99" value="80" />
+      <span class="ctrl-val" id="dsp-approval">80%</span>
+    </div>
+    <div class="control-group">
+      <span class="ctrl-label">Reject above bad rate</span>
+      <input type="range" id="sl-badrate" min="1" max="35" value="12" step="0.5" />
+      <span class="ctrl-val" id="dsp-badrate">12%</span>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-label">Score Cutoff</div><div class="stat-value c-blue"  id="s-cutoff">—</div></div>
+    <div class="stat"><div class="stat-label">Proj. Approval</div><div class="stat-value c-green" id="s-approval">—</div></div>
+    <div class="stat"><div class="stat-label">Bad Rate — Approved</div><div class="stat-value c-amber" id="s-bad-ok">—</div></div>
+    <div class="stat"><div class="stat-label">Bad Rate — Rejected</div><div class="stat-value c-red"   id="s-bad-rej">—</div></div>
+  </div>
+
+  <div class="pav-note">
+    <strong>PAV active.</strong> Empirical bars show observed bad rates per quantile band. The PAV (Pool Adjacent Violators) line enforces monotonicity — any band violating risk ordering is merged with its neighbor and averaged. The cutoff always maps to a clean, monotonically ordered risk boundary.
+  </div>
+</div>
+
+<!-- ── CHART 2 ── -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Population Density &amp; Cumulative Volume</span>
+    <div class="legend">
+      <div class="legend-item active" style="cursor:default">
+        <div class="swatch-bar" style="background:rgba(148,163,184,0.3)"></div>
+        Applications per quantile band
+      </div>
+      <div class="legend-item active" style="cursor:default">
+        <div class="swatch-line" style="background:#38bdf8"></div>
+        Cumulative % approved
+      </div>
+    </div>
+  </div>
+  <div class="chart-wrap" id="wrap2" style="height:148px;">
+    <div class="approve-shade" id="approve2"></div>
+    <div class="reject-shade"  id="reject2"></div>
+    <canvas id="chart2"></canvas>
+    <div class="cutoff-line" id="line2"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// ── Data ─────────────────────────────────────────────────────────
+const TOTAL_LOANS = 50000;
+const rng = (() => { let s=42; return () => { s=(s*1664525+1013904223)&0xffffffff; return (s>>>0)/0xffffffff; }; })();
+
+const loans = Array.from({length: TOTAL_LOANS}, () => {
+  const score = Math.min(0.999, Math.max(0.001,
+    rng() < 0.65 ? 0.15 + rng()*0.45 : 0.40 + rng()*0.58
+  ));
+  const truePD = 1 / (1 + Math.exp(-9*(score-0.60)));
+  return { score, defaulted: rng() < truePD };
+});
+loans.sort((a,b)=>a.score-b.score);
+
+const N_BINS  = 30;
+const binSize = Math.floor(TOTAL_LOANS/N_BINS);
+const bins = Array.from({length:N_BINS}, (_,i)=>{
+  const slice    = loans.slice(i*binSize,(i+1)*binSize);
+  const defaults = slice.filter(l=>l.defaulted).length;
+  return { midScore: slice[Math.floor(slice.length/2)].score, population: slice.length, badRate: defaults/slice.length*100, defaults };
+});
+
+function pav(vals) {
+  const blocks = vals.map((v,i)=>({sum:v,count:1,indices:[i]}));
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(let i=0;i<blocks.length-1;i++){
+      if(blocks[i].sum/blocks[i].count > blocks[i+1].sum/blocks[i+1].count){
+        blocks[i].sum+=blocks[i+1].sum; blocks[i].count+=blocks[i+1].count;
+        blocks[i].indices=blocks[i].indices.concat(blocks[i+1].indices);
+        blocks.splice(i+1,1); changed=true; break;
+      }
+    }
+  }
+  const out=new Array(vals.length);
+  for(const b of blocks){ const avg=b.sum/b.count; for(const idx of b.indices) out[idx]=avg; }
+  return out;
+}
+
+const empiricalBadRates = bins.map(b=>b.badRate);
+const pavBadRates        = pav(empiricalBadRates);
+const cumBadApproved     = bins.map((_,i)=>{ let p=0,d=0; for(let j=0;j<=i;j++){p+=bins[j].population;d+=bins[j].defaults;} return p>0?d/p*100:0; });
+const totalPop           = TOTAL_LOANS;
+const cdfData            = bins.map((_,i)=>{ let c=0; for(let j=0;j<=i;j++) c+=bins[j].population; return c/totalPop*100; });
+const labels             = bins.map(b=>b.midScore.toFixed(3));
+
+// ── State ─────────────────────────────────────────────────────────
+let currentBand      = 0;
+let badRateThreshold = 12;
+
+function bandFromApproval(pct){ for(let i=0;i<N_BINS;i++) if(cdfData[i]>=pct) return i; return N_BINS-1; }
+function bandFromBadRate(thr) { for(let i=0;i<N_BINS;i++) if(pavBadRates[i]>=thr) return Math.max(0,i-1); return N_BINS-1; }
+
+// ── Charts ────────────────────────────────────────────────────────
+const TOOLTIP_BASE = { backgroundColor:'#141720', borderColor:'#1e2436', borderWidth:1, titleColor:'#64748b', bodyColor:'#cbd5e1', padding:10, titleFont:{size:10}, bodyFont:{size:11} };
+const GRID_COLOR   = 'rgba(30,36,54,0.9)';
+const TICK_COLOR   = '#334155';
+const AXIS_COLOR   = '#1e2436';
+
+const wrap1 = document.getElementById('wrap1');
+const wrap2 = document.getElementById('wrap2');
+
+function makeCanvas(id,wrap){ const c=document.getElementById(id); c.width=wrap.clientWidth; c.height=wrap.clientHeight; return c; }
+makeCanvas('chart1',wrap1); makeCanvas('chart2',wrap2);
+
+const chart1 = new Chart(document.getElementById('chart1').getContext('2d'), {
+  data: { labels, datasets: [
+    { type:'bar',  label:'Empirical Bad Rate',      data:empiricalBadRates,
+      backgroundColor:'rgba(96,165,250,0.3)', borderColor:'rgba(96,165,250,0.6)',
+      borderWidth:1, borderRadius:3, yAxisID:'y', order:3 },
+    { type:'line', label:'PAV-smoothed Bad Rate',   data:pavBadRates,
+      borderColor:'rgba(245,158,11,0.9)', borderWidth:1.5,
+      pointRadius:0, tension:0, stepped:true, yAxisID:'y', order:2, fill:false },
+    { type:'line', label:'Cum. Bad Rate (Approved)', data:cumBadApproved,
+      borderColor:'rgba(248,113,113,0.8)', borderWidth:1.5,
+      pointRadius:0, tension:0.4, yAxisID:'y', order:1, fill:false },
+  ]},
+  options: {
+    animation:false, responsive:false, maintainAspectRatio:false,
+    layout:{ padding:{ left:6, right:6, top:4 } },
+    plugins:{
+      legend:{ display:false },
+      tooltip:{ ...TOOLTIP_BASE, callbacks:{
+        title: items=>`Score ${items[0].label}  ·  Band ${items[0].dataIndex+1}/${N_BINS}`,
+        label: item=>{
+          if(item.datasetIndex===0) return ` Empirical: ${item.raw.toFixed(1)}%`;
+          if(item.datasetIndex===1) return ` PAV: ${item.raw.toFixed(1)}%`;
+          return ` Cumulative (approved): ${item.raw.toFixed(2)}%`;
+        }
+      }}
+    },
+    scales:{
+      x:{ ticks:{color:TICK_COLOR,font:{size:10},maxTicksLimit:11,callback:(v,i)=>(i%3===0)?parseFloat(labels[i]).toFixed(2):''}, grid:{color:GRID_COLOR}, border:{color:AXIS_COLOR} },
+      y:{ type:'linear', position:'left', min:0,
+          ticks:{color:TICK_COLOR,font:{size:10},callback:v=>v+'%'},
+          grid:{color:GRID_COLOR}, border:{color:AXIS_COLOR} },
+    }
+  }
+});
+
+const chart2 = new Chart(document.getElementById('chart2').getContext('2d'), {
+  data: { labels, datasets: [
+    { type:'bar',  label:'Applications',     data:bins.map(b=>b.population),
+      backgroundColor:'rgba(148,163,184,0.2)', borderColor:'rgba(148,163,184,0.35)',
+      borderWidth:1, borderRadius:2, yAxisID:'yPop', order:2 },
+    { type:'line', label:'Cum. % Approved',  data:cdfData,
+      borderColor:'rgba(56,189,248,0.8)', borderWidth:1.5,
+      pointRadius:0, tension:0.4, yAxisID:'yCDF', order:1, fill:false },
+  ]},
+  options: {
+    animation:false, responsive:false, maintainAspectRatio:false,
+    layout:{ padding:{ left:6, right:6, top:4 } },
+    plugins:{
+      legend:{ display:false },
+      tooltip:{ ...TOOLTIP_BASE, callbacks:{
+        title: items=>`Score ${items[0].label}`,
+        label: item=>item.datasetIndex===0?` Applications: ${Math.round(item.raw).toLocaleString()}`:` Cum. approved: ${item.raw.toFixed(1)}%`,
+      }}
+    },
+    scales:{
+      x:{ ticks:{color:TICK_COLOR,font:{size:10},maxTicksLimit:11,callback:(v,i)=>(i%3===0)?parseFloat(labels[i]).toFixed(2):''}, grid:{color:GRID_COLOR}, border:{color:AXIS_COLOR} },
+      yPop:{ type:'linear',position:'left',  ticks:{color:TICK_COLOR,font:{size:10},callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v}, grid:{color:GRID_COLOR}, border:{color:AXIS_COLOR} },
+      yCDF:{ type:'linear',position:'right', min:0,max:100, ticks:{color:TICK_COLOR,font:{size:10},callback:v=>v+'%'}, grid:{drawOnChartArea:false}, border:{color:AXIS_COLOR} },
+    }
+  }
+});
+
+// ── Legend toggle ─────────────────────────────────────────────────
+document.getElementById('legend1').querySelectorAll('.legend-item').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    const dsIdx = parseInt(el.dataset.ds);
+    const ds    = chart1.data.datasets[dsIdx];
+    const hidden = !ds.hidden;
+    ds.hidden = hidden;
+    el.classList.toggle('muted', hidden);
+    chart1.update();
+  });
+});
+
+// ── Overlay ───────────────────────────────────────────────────────
+function getCA(ch){ return ch.chartArea; }
+
+function bandToPixel(ch,idx){ const ca=getCA(ch),step=(ca.right-ca.left)/N_BINS; return ca.left+step*idx+step/2; }
+function pixelToBand(ch,px) { const ca=getCA(ch),step=(ca.right-ca.left)/N_BINS; return Math.max(0,Math.min(N_BINS-1,Math.round((px-ca.left)/step))); }
+
+function yForBadRate(ch,pct){ return ch.scales['y'].getPixelForValue(pct); }
+
+function positionOverlay(lineId,approveId,rejectId,ch,showHandle){
+  const px=bandToPixel(ch,currentBand), ca=getCA(ch), h=ca.bottom-ca.top;
+  const line=document.getElementById(lineId);
+  line.style.left=px+'px'; line.style.top=ca.top+'px'; line.style.height=h+'px';
+  const app=document.getElementById(approveId);
+  app.style.left=ca.left+'px'; app.style.width=(px-ca.left)+'px'; app.style.top=ca.top+'px'; app.style.height=h+'px';
+  const rej=document.getElementById(rejectId);
+  rej.style.left=px+'px'; rej.style.width=(ca.right-px)+'px'; rej.style.top=ca.top+'px'; rej.style.height=h+'px';
+}
+
+function positionBadRateLine(){
+  const ca=getCA(chart1), py=yForBadRate(chart1,badRateThreshold);
+  const el=document.getElementById('bad-rate-line');
+  el.style.top=py+'px'; el.style.left=ca.left+'px'; el.style.right=(wrap1.clientWidth-ca.right)+'px';
+}
+
+function updateStats(){
+  let aP=0,aB=0,rP=0,rB=0;
+  for(let i=0;i<N_BINS;i++){
+    if(i<=currentBand){aP+=bins[i].population;aB+=bins[i].defaults;}
+    else              {rP+=bins[i].population;rB+=bins[i].defaults;}
+  }
+  document.getElementById('s-cutoff').textContent   = bins[currentBand].midScore.toFixed(3);
+  document.getElementById('s-approval').textContent = (aP/totalPop*100).toFixed(1)+'%';
+  document.getElementById('s-bad-ok').textContent   = aP>0?(aB/aP*100).toFixed(2)+'%':'—';
+  document.getElementById('s-bad-rej').textContent  = rP>0?(rB/rP*100).toFixed(2)+'%':'—';
+}
+
+function syncApprovalSlider(){ const p=Math.round(cdfData[currentBand]); document.getElementById('sl-approval').value=p; document.getElementById('dsp-approval').textContent=p+'%'; }
+function syncBadRateSlider()  { document.getElementById('sl-badrate').value=badRateThreshold; document.getElementById('dsp-badrate').textContent=badRateThreshold.toFixed(1)+'%'; }
+
+function update(){
+  positionOverlay('line1','approve1','reject1',chart1,true);
+  positionOverlay('line2','approve2','reject2',chart2,false);
+  positionBadRateLine();
+  updateStats();
+}
+
+setTimeout(()=>{ currentBand=bandFromApproval(80); update(); syncApprovalSlider(); syncBadRateSlider(); }, 80);
+
+// ── Sliders ───────────────────────────────────────────────────────
+document.getElementById('sl-approval').addEventListener('input',function(){
+  const pct=parseInt(this.value);
+  document.getElementById('dsp-approval').textContent=pct+'%';
+  currentBand=bandFromApproval(pct);
+  badRateThreshold=Math.round(pavBadRates[currentBand]*2)/2;
+  update(); syncBadRateSlider();
+});
+document.getElementById('sl-badrate').addEventListener('input',function(){
+  badRateThreshold=parseFloat(this.value);
+  document.getElementById('dsp-badrate').textContent=badRateThreshold.toFixed(1)+'%';
+  currentBand=bandFromBadRate(badRateThreshold);
+  update(); syncApprovalSlider();
+});
+
+// ── Drag ──────────────────────────────────────────────────────────
+let dragging=false;
+[wrap1,wrap2].forEach(wrap=>{
+  wrap.addEventListener('mousedown',e=>{ dragging=true; moveTo(e,wrap===wrap1?chart1:chart2,wrap); });
+});
+document.addEventListener('mousemove',e=>{ if(!dragging) return; const r=wrap1.getBoundingClientRect(); const inW1=e.clientX>=r.left&&e.clientX<=r.right; moveTo(e,inW1?chart1:chart2,inW1?wrap1:wrap2); });
+document.addEventListener('mouseup',()=>dragging=false);
+function moveTo(e,ch,wrap){ const r=wrap.getBoundingClientRect(); currentBand=pixelToBand(ch,e.clientX-r.left); badRateThreshold=Math.round(pavBadRates[currentBand]*2)/2; update(); syncApprovalSlider(); syncBadRateSlider(); }
+
+// ── Resize ────────────────────────────────────────────────────────
+window.addEventListener('resize',()=>{
+  [['chart1',wrap1,chart1],['chart2',wrap2,chart2]].forEach(([id,w,ch])=>{ const c=document.getElementById(id); c.width=w.clientWidth; c.height=w.clientHeight; ch.resize(); });
+  update();
+});
+</script>
+</body>
+</html>

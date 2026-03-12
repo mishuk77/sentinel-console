@@ -1,28 +1,67 @@
 import { useState } from "react";
 import {
     X,
-    ArrowRight,
-    ArrowLeft,
     Check,
     AlertCircle,
     Loader2,
+    BrainCircuit,
+    ShieldAlert,
+    Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-    MODULE_REGISTRY,
-    MODULE_ORDER,
-    SYSTEM_TEMPLATES,
-    resolveModuleDependencies,
-    type SystemModule,
-    type SystemTemplate,
-} from "@/lib/modules";
+import type { SystemType } from "@/lib/api";
+
+const SYSTEM_TYPE_OPTIONS: {
+    id: SystemType;
+    name: string;
+    description: string;
+    icon: typeof BrainCircuit;
+    details: string[];
+}[] = [
+    {
+        id: "credit",
+        name: "Credit Risk",
+        description: "Score applications and auto-approve with policy thresholds",
+        icon: BrainCircuit,
+        details: [
+            "Upload data & train credit models",
+            "Configure approval policies & thresholds",
+            "Exposure control & amount ladders",
+            "Adverse action (SHAP-based)",
+        ],
+    },
+    {
+        id: "fraud",
+        name: "Fraud Detection",
+        description: "Detect fraud with ML scoring, risk tiers, and disposition management",
+        icon: ShieldAlert,
+        details: [
+            "Upload fraud data & train models",
+            "Configure risk tier thresholds",
+            "Fraud score & recommended actions",
+            "Fraud disposition workflows",
+        ],
+    },
+    {
+        id: "full",
+        name: "Full Pipeline",
+        description: "Complete decisioning with credit, fraud, policy, and exposure control",
+        icon: Zap,
+        details: [
+            "Everything in Credit Risk",
+            "Everything in Fraud Detection",
+            "Combined bureau-style response",
+            "Unified decision endpoint",
+        ],
+    },
+];
 
 interface CreateSystemWizardProps {
     onClose: () => void;
     onSubmit: (data: {
         name: string;
         description: string;
-        enabled_modules: SystemModule[];
+        system_type: SystemType;
     }) => void;
     isPending: boolean;
     error: string | null;
@@ -34,56 +73,22 @@ export default function CreateSystemWizard({
     isPending,
     error,
 }: CreateSystemWizardProps) {
-    const [step, setStep] = useState<1 | 2>(1);
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
-    const [selectedModules, setSelectedModules] = useState<SystemModule[]>([
-        "credit_scoring",
-        "policy_engine",
-    ]);
-    const [selectedTemplate, setSelectedTemplate] = useState<string | null>(
-        "credit_decisioning"
-    );
-
-    const toggleModule = (moduleId: SystemModule) => {
-        setSelectedTemplate(null); // clear template selection when customizing
-
-        let updated: SystemModule[];
-        if (selectedModules.includes(moduleId)) {
-            updated = selectedModules.filter((m) => m !== moduleId);
-        } else {
-            updated = [...selectedModules, moduleId];
-        }
-        // Resolve dependencies
-        setSelectedModules(resolveModuleDependencies(updated));
-    };
-
-    const selectTemplate = (template: SystemTemplate) => {
-        setSelectedTemplate(template.id);
-        setSelectedModules([...template.modules]);
-    };
+    const [systemType, setSystemType] = useState<SystemType>("full");
 
     const handleCreate = () => {
-        if (!name.trim() || selectedModules.length === 0) return;
+        if (!name.trim()) return;
         onSubmit({
             name: name.trim(),
             description: description.trim(),
-            enabled_modules: selectedModules,
+            system_type: systemType,
         });
     };
 
-    const isModuleRequired = (moduleId: SystemModule): boolean => {
-        // A module is "required" if another selected module depends on it
-        return selectedModules.some(
-            (m) =>
-                m !== moduleId &&
-                MODULE_REGISTRY[m].dependencies.includes(moduleId)
-        );
-    };
-
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-background border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="panel w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b">
                     <div>
@@ -91,8 +96,7 @@ export default function CreateSystemWizard({
                             Create Decision System
                         </h2>
                         <p className="text-sm text-muted-foreground">
-                            Step {step} of 2 —{" "}
-                            {step === 1 ? "System Details" : "Choose Modules"}
+                            Configure a new isolated workspace
                         </p>
                     </div>
                     <button
@@ -103,268 +107,157 @@ export default function CreateSystemWizard({
                     </button>
                 </div>
 
-                {/* Progress Bar */}
-                <div className="h-1 bg-muted">
-                    <div
-                        className="h-full bg-primary transition-all duration-300"
-                        style={{ width: step === 1 ? "50%" : "100%" }}
-                    />
-                </div>
-
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto p-6">
-                    {step === 1 && (
-                        <div className="space-y-5">
-                            <div>
-                                <label className="text-sm font-medium mb-1.5 block">
-                                    System Name{" "}
-                                    <span className="text-red-500">*</span>
-                                </label>
-                                <input
-                                    type="text"
-                                    className="w-full border rounded-lg px-3 py-2.5 bg-background focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                                    placeholder="e.g. Personal Loan Credit Risk"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    autoFocus
-                                />
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium mb-1.5 block">
-                                    Description
-                                </label>
-                                <textarea
-                                    className="w-full border rounded-lg px-3 py-2.5 bg-background focus:ring-2 focus:ring-primary focus:border-primary outline-none resize-none"
-                                    placeholder="Brief description of this decision context"
-                                    rows={3}
-                                    value={description}
-                                    onChange={(e) =>
-                                        setDescription(e.target.value)
-                                    }
-                                />
-                            </div>
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                    {/* Name & Description */}
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-sm font-medium mb-1.5 block">
+                                System Name{" "}
+                                <span className="text-down">*</span>
+                            </label>
+                            <input
+                                type="text"
+                                className="field-input"
+                                placeholder="e.g. Personal Loan Credit Risk"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                autoFocus
+                            />
                         </div>
-                    )}
+                        <div>
+                            <label className="text-sm font-medium mb-1.5 block">
+                                Description
+                            </label>
+                            <textarea
+                                className="field-input resize-none h-auto py-2"
+                                placeholder="Brief description of this decision context"
+                                rows={2}
+                                value={description}
+                                onChange={(e) =>
+                                    setDescription(e.target.value)
+                                }
+                            />
+                        </div>
+                    </div>
 
-                    {step === 2 && (
-                        <div className="space-y-6">
-                            {/* Templates */}
-                            <div>
-                                <h3 className="text-sm font-medium mb-3">
-                                    Start from a template
-                                </h3>
-                                <div className="grid grid-cols-3 gap-3">
-                                    {SYSTEM_TEMPLATES.map((template) => (
-                                        <button
-                                            key={template.id}
-                                            onClick={() =>
-                                                selectTemplate(template)
-                                            }
+                    {/* System Type Selection */}
+                    <div>
+                        <label className="text-sm font-medium mb-3 block">
+                            System Type
+                        </label>
+                        <div className="space-y-3">
+                            {SYSTEM_TYPE_OPTIONS.map((opt) => {
+                                const Icon = opt.icon;
+                                const isSelected = systemType === opt.id;
+                                return (
+                                    <button
+                                        key={opt.id}
+                                        onClick={() => setSystemType(opt.id)}
+                                        className={cn(
+                                            "w-full flex items-start gap-4 p-4 rounded-xl border-2 transition-all text-left",
+                                            isSelected
+                                                ? "border-primary bg-primary/5"
+                                                : "border-transparent bg-muted/30 hover:bg-muted/50"
+                                        )}
+                                    >
+                                        {/* Radio */}
+                                        <div
                                             className={cn(
-                                                "text-left p-4 rounded-xl border-2 transition-all",
-                                                selectedTemplate ===
-                                                    template.id
-                                                    ? "border-primary bg-primary/5"
-                                                    : "border-transparent bg-muted/50 hover:bg-muted"
-                                            )}
-                                        >
-                                            <div className="text-2xl mb-2">
-                                                {template.emoji}
-                                            </div>
-                                            <div className="font-medium text-sm">
-                                                {template.name}
-                                            </div>
-                                            <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                                                {template.description}
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Divider */}
-                            <div className="flex items-center gap-3">
-                                <div className="flex-1 border-t" />
-                                <span className="text-xs text-muted-foreground uppercase tracking-wider">
-                                    or customize
-                                </span>
-                                <div className="flex-1 border-t" />
-                            </div>
-
-                            {/* Module Picker */}
-                            <div className="space-y-2">
-                                {MODULE_ORDER.map((moduleId) => {
-                                    const mod = MODULE_REGISTRY[moduleId];
-                                    const Icon = mod.icon;
-                                    const isSelected =
-                                        selectedModules.includes(moduleId);
-                                    const isRequired =
-                                        isModuleRequired(moduleId);
-                                    const hasDeps =
-                                        mod.dependencies.length > 0;
-
-                                    return (
-                                        <button
-                                            key={moduleId}
-                                            onClick={() =>
-                                                !isRequired &&
-                                                toggleModule(moduleId)
-                                            }
-                                            className={cn(
-                                                "w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left",
+                                                "flex-shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors",
                                                 isSelected
-                                                    ? "border-primary bg-primary/5"
-                                                    : "border-transparent bg-muted/30 hover:bg-muted/50"
+                                                    ? "bg-primary border-primary"
+                                                    : "border-muted-foreground/30"
                                             )}
                                         >
-                                            {/* Checkbox */}
-                                            <div
-                                                className={cn(
-                                                    "flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
-                                                    isSelected
-                                                        ? "bg-primary border-primary"
-                                                        : "border-muted-foreground/30"
-                                                )}
-                                            >
-                                                {isSelected && (
-                                                    <Check className="h-3 w-3 text-primary-foreground" />
-                                                )}
-                                            </div>
+                                            {isSelected && (
+                                                <Check className="h-3 w-3 text-primary-foreground" />
+                                            )}
+                                        </div>
 
-                                            {/* Icon */}
-                                            <div
-                                                className={cn(
-                                                    "flex-shrink-0 p-2 rounded-lg",
-                                                    isSelected
-                                                        ? `bg-${mod.color}-100 dark:bg-${mod.color}-900/30`
-                                                        : "bg-muted"
-                                                )}
-                                            >
-                                                <Icon
-                                                    className={cn(
-                                                        "h-5 w-5",
-                                                        isSelected
-                                                            ? `text-${mod.color}-600 dark:text-${mod.color}-400`
-                                                            : "text-muted-foreground"
-                                                    )}
-                                                />
-                                            </div>
-
-                                            {/* Info */}
-                                            <div className="flex-1 min-w-0">
-                                                <div className="font-medium text-sm flex items-center gap-2">
-                                                    {mod.name}
-                                                    {isRequired && (
-                                                        <span className="text-xs px-1.5 py-0.5 bg-muted rounded text-muted-foreground">
-                                                            required
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <div className="text-xs text-muted-foreground mt-0.5">
-                                                    {mod.description}
-                                                    {hasDeps && (
-                                                        <span className="ml-1 text-muted-foreground/70">
-                                                            (requires{" "}
-                                                            {mod.dependencies
-                                                                .map(
-                                                                    (d) =>
-                                                                        MODULE_REGISTRY[
-                                                                            d
-                                                                        ]
-                                                                            .shortName
-                                                                )
-                                                                .join(", ")}
-                                                            )
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-
-                            {/* Selected Summary */}
-                            <div className="flex flex-wrap gap-1.5 pt-2">
-                                {selectedModules.map((moduleId) => {
-                                    const mod = MODULE_REGISTRY[moduleId];
-                                    return (
-                                        <span
-                                            key={moduleId}
+                                        {/* Icon */}
+                                        <div
                                             className={cn(
-                                                "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium",
-                                                mod.badgeClasses
+                                                "flex-shrink-0 p-2 rounded-lg",
+                                                isSelected
+                                                    ? "bg-primary/20"
+                                                    : "bg-muted"
                                             )}
                                         >
-                                            {mod.shortName}
-                                        </span>
-                                    );
-                                })}
-                            </div>
+                                            <Icon
+                                                className={cn(
+                                                    "h-5 w-5",
+                                                    isSelected
+                                                        ? "text-primary"
+                                                        : "text-muted-foreground"
+                                                )}
+                                            />
+                                        </div>
+
+                                        {/* Info */}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-sm">
+                                                {opt.name}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground mt-0.5">
+                                                {opt.description}
+                                            </div>
+                                            {isSelected && (
+                                                <ul className="mt-2 space-y-1">
+                                                    {opt.details.map((d, i) => (
+                                                        <li
+                                                            key={i}
+                                                            className="text-xs text-muted-foreground flex items-center gap-1.5"
+                                                        >
+                                                            <span className="w-1 h-1 rounded-full bg-primary flex-shrink-0" />
+                                                            {d}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    </button>
+                                );
+                            })}
                         </div>
-                    )}
+                    </div>
                 </div>
 
                 {/* Error */}
                 {error && (
-                    <div className="mx-6 mb-2 flex items-center gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
-                        <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                    <div className="mx-5 mb-2 flex items-center gap-2 p-3 panel border-down/30 text-down text-xs">
+                        <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
                         {error}
                     </div>
                 )}
 
                 {/* Footer */}
-                <div className="flex items-center justify-between px-6 py-4 border-t bg-muted/20">
-                    <div>
-                        {step === 2 && (
-                            <button
-                                onClick={() => setStep(1)}
-                                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                                <ArrowLeft className="h-4 w-4" />
-                                Back
-                            </button>
-                        )}
-                    </div>
-                    <div className="flex items-center gap-3">
+                <div className="panel-head border-b-0 border-t">
+                    <div />
+                    <div className="flex items-center gap-2">
                         <button
                             onClick={onClose}
-                            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
+                            className="btn-ghost btn-sm"
                         >
                             Cancel
                         </button>
-                        {step === 1 ? (
-                            <button
-                                onClick={() => setStep(2)}
-                                disabled={!name.trim()}
-                                className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Next
-                                <ArrowRight className="h-4 w-4" />
-                            </button>
-                        ) : (
-                            <button
-                                onClick={handleCreate}
-                                disabled={
-                                    !name.trim() ||
-                                    selectedModules.length === 0 ||
-                                    isPending
-                                }
-                                className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {isPending ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        Creating...
-                                    </>
-                                ) : (
-                                    <>
-                                        Create System
-                                        <Check className="h-4 w-4" />
-                                    </>
-                                )}
-                            </button>
-                        )}
+                        <button
+                            onClick={handleCreate}
+                            disabled={!name.trim() || isPending}
+                            className="btn-primary btn-sm"
+                        >
+                            {isPending ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Creating...
+                                </>
+                            ) : (
+                                <>
+                                    Create System
+                                    <Check className="h-4 w-4" />
+                                </>
+                            )}
+                        </button>
                     </div>
                 </div>
             </div>

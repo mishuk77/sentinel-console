@@ -1,27 +1,28 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Search, Calculator, Check, X, TrendingUp, TrendingDown, ChevronLeft, ChevronRight, AlertCircle, Eye, FileText } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, FileText, Eye, X, Check, ArrowUpDown, ArrowUp, ArrowDown, ShieldAlert, CreditCard } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface ReasonCode {
-    feature: string;
-    impact: number;
-    direction: "positive" | "negative";
-}
 
 interface DecisionRecord {
     id: string;
     applicant_name: string;
     decision: "APPROVE" | "DECLINE";
     score: number;
-    metric_decile: number;
-    allowed_amount: number;
-    approved_amount: number;
-    reason_codes: ReasonCode[];
+    metric_decile: number | null;
+    allowed_amount: number | null;
+    approved_amount: number | null;
+    reason_codes: any;
     input_payload: Record<string, any>;
-    created_at: string;
+    timestamp: string;
     decision_system_id: string;
+    model_version_id: string | null;
+    policy_version_id: string | null;
+    fraud_score: number | null;
+    fraud_tier: string | null;
+    fraud_action: string | null;
+    fraud_model_id: string | null;
+    adverse_action_factors: any[] | null;
 }
 
 interface DecisionSystem {
@@ -29,16 +30,36 @@ interface DecisionSystem {
     name: string;
 }
 
-const PAGE_SIZE = 20;
+type SortField = "timestamp" | "applicant_name" | "decision" | "score" | "approved_amount" | "fraud_score" | "fraud_tier" | "metric_decile";
+type SortDir = "asc" | "desc";
+
+const PAGE_SIZE = 25;
+
+const FRAUD_TIER_COLORS: Record<string, string> = {
+    LOW: "badge-green",
+    MEDIUM: "badge-amber",
+    HIGH: "badge-red",
+    CRITICAL: "badge-red",
+};
+
+function formatDateTime(ts: string | null | undefined): { date: string; time: string } {
+    if (!ts) return { date: "—", time: "" };
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return { date: "—", time: "" };
+    return {
+        date: d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        time: d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    };
+}
 
 export default function Decisions() {
-    const queryClient = useQueryClient();
     const [searchTerm, setSearchTerm] = useState("");
-    const [selectedSystemId, setSelectedSystemId] = useState<string>("");
     const [currentPage, setCurrentPage] = useState(1);
     const [selectedDecision, setSelectedDecision] = useState<DecisionRecord | null>(null);
+    const [sortField, setSortField] = useState<SortField>("timestamp");
+    const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-    // Fetch Systems
+    // Fetch Systems for name lookup
     const { data: systems } = useQuery<DecisionSystem[]>({
         queryKey: ["systems"],
         queryFn: async () => {
@@ -47,597 +68,402 @@ export default function Decisions() {
         }
     });
 
-    // Auto-select first system if available and none selected
-    if (systems?.length && !selectedSystemId) {
-        setSelectedSystemId(systems[0].id);
-    }
-
-    // Manual Entry Form
-    const [form, setForm] = useState({
-        applicant_name: "John Doe",
-        fico: 720,
-        income: 85000,
-        loan_amnt: 15000
-    });
-
-    // Fetch History with pagination
-    const { data: decisionsData, isLoading } = useQuery<{ decisions: DecisionRecord[]; total: number }>({
-        queryKey: ["decisions", searchTerm, currentPage],
+    // Fetch all decisions (let backend paginate later if needed)
+    const { data: rawDecisions, isLoading } = useQuery<DecisionRecord[]>({
+        queryKey: ["decisions", searchTerm],
         queryFn: async () => {
-            const params: any = {
-                skip: (currentPage - 1) * PAGE_SIZE,
-                limit: PAGE_SIZE
-            };
+            const params: any = { skip: 0, limit: 200 };
             if (searchTerm) params.applicant_name = searchTerm;
             const res = await api.get("/decisions/", { params });
-            // Backend may return array directly or with total - handle both
-            const data = res.data;
-            if (Array.isArray(data)) {
-                return { decisions: data, total: data.length };
-            }
-            return { decisions: data.items || data, total: data.total || data.length };
+            return Array.isArray(res.data) ? res.data : res.data.items || res.data;
         },
         refetchInterval: 5000
     });
 
-    const decisions = decisionsData?.decisions;
-    const totalDecisions = decisionsData?.total || 0;
-    const totalPages = Math.ceil(totalDecisions / PAGE_SIZE);
+    // Sort client-side
+    const decisions = useMemo(() => {
+        if (!rawDecisions) return [];
+        const sorted = [...rawDecisions].sort((a, b) => {
+            let aVal: any = a[sortField];
+            let bVal: any = b[sortField];
 
-    // Reset to page 1 when search changes
+            // Handle nulls
+            if (aVal == null && bVal == null) return 0;
+            if (aVal == null) return 1;
+            if (bVal == null) return -1;
+
+            if (sortField === "timestamp") {
+                aVal = new Date(aVal).getTime();
+                bVal = new Date(bVal).getTime();
+            }
+            if (typeof aVal === "string") {
+                aVal = aVal.toLowerCase();
+                bVal = (bVal as string).toLowerCase();
+            }
+
+            if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
+            if (aVal > bVal) return sortDir === "asc" ? 1 : -1;
+            return 0;
+        });
+        return sorted;
+    }, [rawDecisions, sortField, sortDir]);
+
+    // Paginate
+    const totalDecisions = decisions.length;
+    const totalPages = Math.max(1, Math.ceil(totalDecisions / PAGE_SIZE));
+    const pagedDecisions = decisions.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
     const handleSearch = (term: string) => {
         setSearchTerm(term);
         setCurrentPage(1);
     };
 
-    // Make Decision Mutation
-    const decisionMutation = useMutation({
-        mutationFn: async () => {
-            if (!selectedSystemId) throw new Error("Please select a Decision System");
-
-            // Structure matches DecisionRequest
-            const payload = {
-                applicant_name: form.applicant_name,
-                applicant_ssn: "000-00-0000",
-                inputs: {
-                    fico: Number(form.fico),
-                    income: Number(form.income),
-                    loan_amnt: Number(form.loan_amnt)
-                }
-            };
-
-            const res = await api.post(`/decisions/${selectedSystemId}`, payload);
-            return res.data;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["decisions"] });
+    const toggleSort = (field: SortField) => {
+        if (sortField === field) {
+            setSortDir(d => d === "asc" ? "desc" : "asc");
+        } else {
+            setSortField(field);
+            setSortDir(field === "timestamp" ? "desc" : "asc");
         }
-    });
+    };
 
-    const lastResult = decisionMutation.data;
+    const SortIcon = ({ field }: { field: SortField }) => {
+        if (sortField !== field) return <ArrowUpDown className="h-3 w-3 text-muted-foreground/40" />;
+        return sortDir === "asc"
+            ? <ArrowUp className="h-3 w-3 text-primary" />
+            : <ArrowDown className="h-3 w-3 text-primary" />;
+    };
+
+    const systemName = (id: string) => systems?.find(s => s.id === id)?.name || id?.slice(0, 8);
 
     return (
-        <div className="p-8 max-w-7xl mx-auto space-y-8">
+        <div className="page">
             {/* Header */}
             <div>
-                <h1 className="text-3xl font-bold tracking-tight text-foreground">Decisions Engine</h1>
-                <p className="text-muted-foreground mt-2">
-                    Test decision logic manually or browse historical decisions.
-                </p>
+                <h1 className="page-title">Decision Ledger</h1>
+                <p className="page-desc">Full audit trail of every decision processed through the pipeline.</p>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-                {/* Manual Test Form */}
-                <div className="lg:col-span-1 space-y-6">
-                    <div className="bg-card border rounded-xl p-6 shadow-sm">
-                        <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                            <Calculator className="h-5 w-5" /> Manual Test
-                        </h3>
-
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-sm font-medium">Decision System</label>
-                                <select
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1"
-                                    value={selectedSystemId}
-                                    onChange={(e) => setSelectedSystemId(e.target.value)}
-                                >
-                                    <option value="" disabled>Select a system...</option>
-                                    {systems?.map(s => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium">Applicant Name</label>
-                                <input
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1"
-                                    value={form.applicant_name}
-                                    onChange={(e) => setForm({ ...form, applicant_name: e.target.value })}
-                                />
-                            </div>
-                            {/* ... inputs ... */}
-                            {/* Shortened for brevity in tool call, but I must preserve the other inputs or this will delete them. 
-                                Actually, replace_file_content replaces the block. I need to be careful. 
-                                I will target the "Applicant Name" block and INSERT the System Select before it.
-                            */}
-
-                            {/* I will cancel and use a smaller replacement for just the System Select insertion */}
-                            <div>
-                                <label className="text-sm font-medium">FICO Score</label>
-                                <input
-                                    type="number"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1"
-                                    value={form.fico}
-                                    onChange={(e) => setForm({ ...form, fico: Number(e.target.value) })}
-                                />
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium">Annual Income</label>
-                                <input
-                                    type="number"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1"
-                                    value={form.income}
-                                    onChange={(e) => setForm({ ...form, income: Number(e.target.value) })}
-                                />
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium">Loan Amount</label>
-                                <input
-                                    type="number"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm mt-1"
-                                    value={form.loan_amnt}
-                                    onChange={(e) => setForm({ ...form, loan_amnt: Number(e.target.value) })}
-                                />
-                            </div>
-
-                            <button
-                                onClick={() => decisionMutation.mutate()}
-                                disabled={decisionMutation.isPending}
-                                className="w-full bg-primary text-primary-foreground h-10 rounded-md font-medium hover:bg-primary/90 mt-4 transition-colors"
-                            >
-                                {decisionMutation.isPending ? "Analyzing..." : "Run Decision"}
-                            </button>
-
-                            {decisionMutation.isError && (
-                                <div className="mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg flex items-start gap-2">
-                                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                                    <div className="text-sm text-destructive">
-                                        {(decisionMutation.error as any)?.response?.data?.detail
-                                            || (decisionMutation.error as Error)?.message
-                                            || "Failed to run decision. Please check the system has an active model and policy."}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Last Result Card */}
-                    {lastResult && (
-                        <div className={cn(
-                            "border rounded-xl p-6 shadow-sm animate-in fade-in slide-in-from-top-4",
-                            lastResult.decision === "APPROVE" ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
-                        )}>
-                            <div className="flex justify-between items-center mb-4">
-                                <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Result</span>
-                                <span className={cn(
-                                    "px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1",
-                                    lastResult.decision === "APPROVE" ? "bg-green-200 text-green-800" : "bg-red-200 text-red-800"
-                                )}>
-                                    {lastResult.decision === "APPROVE" ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
-                                    {lastResult.decision}
-                                </span>
-                            </div>
-
-                            <div className="space-y-3 text-sm">
-                                {/* Core Metrics */}
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-white/50 rounded-lg p-3">
-                                        <div className="text-xs text-muted-foreground uppercase">Risk Score</div>
-                                        <div className="font-mono font-bold text-lg">{(lastResult.score * 100).toFixed(1)}</div>
-                                    </div>
-                                    <div className="bg-white/50 rounded-lg p-3">
-                                        <div className="text-xs text-muted-foreground uppercase">Risk Decile</div>
-                                        <div className="font-mono font-bold text-lg">{lastResult.metric_decile || "-"}</div>
-                                    </div>
-                                </div>
-
-                                {/* Amount Info (if available) */}
-                                {(lastResult.allowed_amount || lastResult.approved_amount) && (
-                                    <div className="border-t pt-3 mt-3">
-                                        <div className="text-xs text-muted-foreground uppercase mb-2">Amount Decision</div>
-                                        <div className="grid grid-cols-2 gap-3 text-xs">
-                                            {lastResult.allowed_amount && (
-                                                <div>
-                                                    <span className="text-muted-foreground">Max Allowed:</span>
-                                                    <span className="font-mono font-bold ml-2">${lastResult.allowed_amount.toLocaleString()}</span>
-                                                </div>
-                                            )}
-                                            {lastResult.approved_amount && (
-                                                <div>
-                                                    <span className="text-muted-foreground">Approved:</span>
-                                                    <span className="font-mono font-bold ml-2 text-green-700">${lastResult.approved_amount.toLocaleString()}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Reason Codes */}
-                                {lastResult.reason_codes && lastResult.reason_codes.length > 0 && (
-                                    <div className="border-t pt-3 mt-3">
-                                        <div className="text-xs text-muted-foreground uppercase mb-2">Key Factors</div>
-                                        <div className="space-y-1.5">
-                                            {lastResult.reason_codes.slice(0, 5).map((rc: ReasonCode, idx: number) => (
-                                                <div key={idx} className="flex items-center justify-between text-xs bg-white/50 rounded px-2 py-1.5">
-                                                    <div className="flex items-center gap-2">
-                                                        {rc.direction === "positive" ? (
-                                                            <TrendingUp className="w-3.5 h-3.5 text-green-600" />
-                                                        ) : (
-                                                            <TrendingDown className="w-3.5 h-3.5 text-red-600" />
-                                                        )}
-                                                        <span className="capitalize">{rc.feature.replace(/_/g, " ")}</span>
-                                                    </div>
-                                                    <span className={cn(
-                                                        "font-mono font-semibold",
-                                                        rc.direction === "positive" ? "text-green-700" : "text-red-700"
-                                                    )}>
-                                                        {rc.direction === "positive" ? "+" : ""}{(rc.impact * 100).toFixed(1)}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
+            {/* Search + count */}
+            <div className="flex items-center gap-4">
+                <div className="relative flex-1 max-w-md">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <input
+                        type="search"
+                        placeholder="Search by applicant name…"
+                        className="field-input pl-8"
+                        value={searchTerm}
+                        onChange={(e) => handleSearch(e.target.value)}
+                    />
                 </div>
+                <span className="text-xs text-muted-foreground">
+                    {totalDecisions} decision{totalDecisions !== 1 ? "s" : ""}
+                </span>
+            </div>
 
-                {/* History Table */}
-                <div className="lg:col-span-2 space-y-4">
-                    <div className="flex gap-2">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <input
-                                type="search"
-                                placeholder="Search by name..."
-                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm pl-9"
-                                value={searchTerm}
-                                onChange={(e) => handleSearch(e.target.value)}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="bg-card border rounded-xl shadow-sm overflow-hidden min-h-[500px]">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-muted/50 text-muted-foreground uppercase font-medium">
+            {/* Table */}
+            <div className="panel overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="dt dt-hover w-full">
+                        <thead>
+                            <tr>
+                                <Th field="timestamp" label="Date / Time" sortField={sortField} sortDir={sortDir} toggle={toggleSort} />
+                                <th className="text-xs">System</th>
+                                <Th field="applicant_name" label="Applicant" sortField={sortField} sortDir={sortDir} toggle={toggleSort} />
+                                <Th field="decision" label="Decision" sortField={sortField} sortDir={sortDir} toggle={toggleSort} />
+                                <Th field="score" label="Credit Score" sortField={sortField} sortDir={sortDir} toggle={toggleSort} />
+                                <Th field="metric_decile" label="Decile" sortField={sortField} sortDir={sortDir} toggle={toggleSort} />
+                                <Th field="approved_amount" label="Approved Amt" sortField={sortField} sortDir={sortDir} toggle={toggleSort} />
+                                <Th field="fraud_score" label="Fraud Score" sortField={sortField} sortDir={sortDir} toggle={toggleSort} />
+                                <Th field="fraud_tier" label="Fraud Tier" sortField={sortField} sortDir={sortDir} toggle={toggleSort} />
+                                <th className="text-xs">Fraud CTA</th>
+                                <th className="text-xs w-8"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {isLoading ? (
+                                <tr><td colSpan={11} className="p-8 text-center text-muted-foreground text-xs">Loading decisions…</td></tr>
+                            ) : pagedDecisions.length === 0 ? (
                                 <tr>
-                                    <th className="px-6 py-3">System</th>
-                                    <th className="px-6 py-3">Applicant</th>
-                                    <th className="px-6 py-3">Decision</th>
-                                    <th className="px-6 py-3">Score</th>
-                                    <th className="px-6 py-3">Date</th>
+                                    <td colSpan={11} className="p-12 text-center">
+                                        <div className="icon-box bg-muted/40 mx-auto mb-3">
+                                            <FileText className="h-5 w-5 text-muted-foreground/50" />
+                                        </div>
+                                        <p className="text-sm font-semibold mb-1">No decisions yet</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Run a decision from the Integration sandbox or via API.
+                                        </p>
+                                    </td>
                                 </tr>
-                            </thead>
-                            <tbody className="divide-y">
-                                {isLoading ? (
-                                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Loading decisions...</td></tr>
-                                ) : decisions?.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={5} className="p-12 text-center">
-                                            <div className="bg-muted/30 rounded-full h-14 w-14 flex items-center justify-center mx-auto mb-4">
-                                                <FileText className="h-7 w-7 text-muted-foreground/50" />
-                                            </div>
-                                            <h3 className="text-base font-semibold text-foreground mb-2">No Decisions Yet</h3>
-                                            <p className="text-muted-foreground mb-4 max-w-sm mx-auto text-sm">
-                                                Test your decision system using the manual form, or integrate via API.
-                                            </p>
-                                            <div className="flex items-center justify-center gap-3">
-                                                <a
-                                                    href="#manual-test"
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        document.querySelector('input[name="applicant_name"]')?.closest('.bg-card')?.scrollIntoView({ behavior: 'smooth' });
-                                                    }}
-                                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-                                                >
-                                                    <Calculator className="h-4 w-4" />
-                                                    Run Manual Test
-                                                </a>
-                                                <span className="text-muted-foreground">•</span>
-                                                <a
-                                                    href="/api/docs"
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-                                                >
-                                                    <FileText className="h-4 w-4" />
-                                                    API Documentation
-                                                </a>
-                                            </div>
+                            ) : pagedDecisions.map((d) => {
+                                const dt = formatDateTime(d.timestamp);
+                                return (
+                                    <tr key={d.id} className="cursor-pointer group" onClick={() => setSelectedDecision(d)}>
+                                        <td>
+                                            <div className="text-xs">{dt.date}</div>
+                                            <div className="text-[10px] text-muted-foreground">{dt.time}</div>
                                         </td>
-                                    </tr>
-                                ) : decisions?.map((d) => (
-                                    <tr
-                                        key={d.id}
-                                        className="hover:bg-muted/50 transition-colors cursor-pointer group"
-                                        onClick={() => setSelectedDecision(d)}
-                                    >
-                                        <td className="px-6 py-4 text-xs font-mono text-muted-foreground">
-                                            {systems?.find(s => s.id === d.decision_system_id)?.name || d.decision_system_id?.slice(0, 8) || "N/A"}
+                                        <td className="font-mono text-2xs text-muted-foreground max-w-[100px] truncate">
+                                            {systemName(d.decision_system_id)}
                                         </td>
-                                        <td className="px-6 py-4 font-medium">{d.applicant_name || "Unknown"}</td>
-                                        <td className="px-6 py-4">
-                                            <span className={cn(
-                                                "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold",
-                                                d.decision === "APPROVE" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800",
-                                            )}>
+                                        <td className="font-medium text-xs">{d.applicant_name || "—"}</td>
+                                        <td>
+                                            <span className={d.decision === "APPROVE" ? "badge badge-green" : "badge badge-red"}>
                                                 {d.decision}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 font-mono">
-                                            {(d.score * 100).toFixed(1)}
+                                        <td className="font-mono text-xs num">{d.score != null ? (d.score * 100).toFixed(1) : "—"}</td>
+                                        <td className="font-mono text-xs text-center">{d.metric_decile ?? "—"}</td>
+                                        <td className="font-mono text-xs num">
+                                            {d.approved_amount != null ? `$${d.approved_amount.toLocaleString()}` : "—"}
                                         </td>
-                                        <td className="px-6 py-4 text-muted-foreground flex items-center justify-between">
-                                            <span>{new Date(d.created_at).toLocaleString()}</span>
-                                            <Eye className="h-4 w-4 opacity-0 group-hover:opacity-50 transition-opacity" />
+                                        <td className="font-mono text-xs num">
+                                            {d.fraud_score != null ? (d.fraud_score * 100).toFixed(1) : "—"}
+                                        </td>
+                                        <td>
+                                            {d.fraud_tier ? (
+                                                <span className={cn("badge", FRAUD_TIER_COLORS[d.fraud_tier] || "badge-muted")}>
+                                                    {d.fraud_tier}
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground">—</span>
+                                            )}
+                                        </td>
+                                        <td className="text-2xs text-muted-foreground">{d.fraud_action || "—"}</td>
+                                        <td>
+                                            <Eye className="h-3.5 w-3.5 opacity-0 group-hover:opacity-40 transition-opacity" />
                                         </td>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-
-                        {/* Pagination Controls */}
-                        {totalPages > 1 && (
-                            <div className="flex items-center justify-between px-6 py-4 border-t bg-muted/30">
-                                <div className="text-sm text-muted-foreground">
-                                    Showing {((currentPage - 1) * PAGE_SIZE) + 1} - {Math.min(currentPage * PAGE_SIZE, totalDecisions)} of {totalDecisions} decisions
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                        disabled={currentPage === 1}
-                                        className={cn(
-                                            "inline-flex items-center justify-center h-8 w-8 rounded-md border text-sm font-medium transition-colors",
-                                            currentPage === 1
-                                                ? "opacity-50 cursor-not-allowed bg-muted"
-                                                : "hover:bg-accent hover:text-accent-foreground"
-                                        )}
-                                    >
-                                        <ChevronLeft className="h-4 w-4" />
-                                    </button>
-                                    <div className="flex items-center gap-1">
-                                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                            let pageNum: number;
-                                            if (totalPages <= 5) {
-                                                pageNum = i + 1;
-                                            } else if (currentPage <= 3) {
-                                                pageNum = i + 1;
-                                            } else if (currentPage >= totalPages - 2) {
-                                                pageNum = totalPages - 4 + i;
-                                            } else {
-                                                pageNum = currentPage - 2 + i;
-                                            }
-                                            return (
-                                                <button
-                                                    key={pageNum}
-                                                    onClick={() => setCurrentPage(pageNum)}
-                                                    className={cn(
-                                                        "inline-flex items-center justify-center h-8 w-8 rounded-md text-sm font-medium transition-colors",
-                                                        currentPage === pageNum
-                                                            ? "bg-primary text-primary-foreground"
-                                                            : "hover:bg-accent hover:text-accent-foreground"
-                                                    )}
-                                                >
-                                                    {pageNum}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                        disabled={currentPage === totalPages}
-                                        className={cn(
-                                            "inline-flex items-center justify-center h-8 w-8 rounded-md border text-sm font-medium transition-colors",
-                                            currentPage === totalPages
-                                                ? "opacity-50 cursor-not-allowed bg-muted"
-                                                : "hover:bg-accent hover:text-accent-foreground"
-                                        )}
-                                    >
-                                        <ChevronRight className="h-4 w-4" />
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                                );
+                            })}
+                        </tbody>
+                    </table>
                 </div>
 
+                {/* Pagination */}
+                {totalPages > 1 && (
+                    <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/20">
+                        <div className="text-xs text-muted-foreground">
+                            {((currentPage - 1) * PAGE_SIZE) + 1}–{Math.min(currentPage * PAGE_SIZE, totalDecisions)} of {totalDecisions}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                                className={cn("h-7 w-7 flex items-center justify-center rounded border text-xs",
+                                    currentPage === 1 ? "opacity-40 cursor-not-allowed" : "hover:bg-accent")}
+                            >
+                                <ChevronLeft className="h-3.5 w-3.5" />
+                            </button>
+                            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                let pageNum: number;
+                                if (totalPages <= 5) pageNum = i + 1;
+                                else if (currentPage <= 3) pageNum = i + 1;
+                                else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                                else pageNum = currentPage - 2 + i;
+                                return (
+                                    <button key={pageNum} onClick={() => setCurrentPage(pageNum)}
+                                        className={cn("h-7 w-7 flex items-center justify-center rounded text-xs",
+                                            currentPage === pageNum ? "bg-primary text-primary-foreground" : "hover:bg-accent"
+                                        )}>
+                                        {pageNum}
+                                    </button>
+                                );
+                            })}
+                            <button
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={currentPage === totalPages}
+                                className={cn("h-7 w-7 flex items-center justify-center rounded border text-xs",
+                                    currentPage === totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-accent")}
+                            >
+                                <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
-            {/* Decision Detail Modal */}
+            {/* Detail Modal */}
             {selectedDecision && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-                    onClick={() => setSelectedDecision(null)}
-                >
-                    <div
-                        className="bg-background rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* Modal Header */}
-                        <div className={cn(
-                            "flex items-center justify-between p-6 border-b",
-                            selectedDecision.decision === "APPROVE" ? "bg-green-50" : "bg-red-50"
-                        )}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+                    onClick={() => setSelectedDecision(null)}>
+                    <div className="panel w-full max-w-3xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200 shadow-2xl thin-scroll"
+                        onClick={e => e.stopPropagation()}>
+
+                        {/* Header */}
+                        <div className="panel-head">
                             <div className="flex items-center gap-3">
-                                <div className={cn(
-                                    "p-2 rounded-full",
-                                    selectedDecision.decision === "APPROVE" ? "bg-green-100" : "bg-red-100"
-                                )}>
-                                    {selectedDecision.decision === "APPROVE" ? (
-                                        <Check className="h-5 w-5 text-green-700" />
-                                    ) : (
-                                        <X className="h-5 w-5 text-red-700" />
-                                    )}
+                                <div className={cn("icon-box",
+                                    selectedDecision.decision === "APPROVE" ? "bg-up/10" : "bg-down/10")}>
+                                    {selectedDecision.decision === "APPROVE"
+                                        ? <Check className="h-4 w-4 text-up" />
+                                        : <X className="h-4 w-4 text-down" />}
                                 </div>
                                 <div>
-                                    <h2 className="text-lg font-bold">Decision Details</h2>
-                                    <p className="text-sm text-muted-foreground">
-                                        {selectedDecision.applicant_name || "Unknown Applicant"}
-                                    </p>
+                                    <p className="panel-title">Decision Detail</p>
+                                    <p className="text-xs text-muted-foreground">{selectedDecision.applicant_name || "Unknown"}</p>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => setSelectedDecision(null)}
-                                className="p-2 hover:bg-muted rounded-full transition-colors"
-                            >
-                                <X className="h-5 w-5" />
+                            <button onClick={() => setSelectedDecision(null)} className="p-1.5 hover:bg-accent rounded">
+                                <X className="h-4 w-4 text-muted-foreground" />
                             </button>
                         </div>
 
-                        {/* Modal Body */}
-                        <div className="p-6 space-y-6">
-                            {/* Decision Summary */}
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div className="bg-muted/30 rounded-lg p-4 text-center">
-                                    <div className="text-xs text-muted-foreground uppercase mb-1">Decision</div>
-                                    <div className={cn(
-                                        "font-bold text-lg",
-                                        selectedDecision.decision === "APPROVE" ? "text-green-700" : "text-red-700"
-                                    )}>
-                                        {selectedDecision.decision}
+                        <div className="p-5 space-y-4">
+                            {/* Credit Assessment */}
+                            <div className="panel p-4">
+                                <p className="panel-title flex items-center gap-1.5 mb-3">
+                                    <CreditCard className="h-3.5 w-3.5 text-info" /> Credit Risk Assessment
+                                </p>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                    <div className="kpi text-center">
+                                        <p className="kpi-label">Decision</p>
+                                        <span className={selectedDecision.decision === "APPROVE" ? "badge badge-green" : "badge badge-red"}>
+                                            {selectedDecision.decision}
+                                        </span>
                                     </div>
-                                </div>
-                                <div className="bg-muted/30 rounded-lg p-4 text-center">
-                                    <div className="text-xs text-muted-foreground uppercase mb-1">Risk Score</div>
-                                    <div className="font-bold text-lg font-mono">
-                                        {(selectedDecision.score * 100).toFixed(1)}
+                                    <div className="kpi text-center">
+                                        <p className="kpi-label">PD Score</p>
+                                        <p className="kpi-value font-mono">{(selectedDecision.score * 100).toFixed(2)}%</p>
                                     </div>
-                                </div>
-                                <div className="bg-muted/30 rounded-lg p-4 text-center">
-                                    <div className="text-xs text-muted-foreground uppercase mb-1">Risk Decile</div>
-                                    <div className="font-bold text-lg font-mono">
-                                        {selectedDecision.metric_decile || "-"}
+                                    <div className="kpi text-center">
+                                        <p className="kpi-label">Risk Decile</p>
+                                        <p className="kpi-value font-mono">{selectedDecision.metric_decile ?? "—"}</p>
                                     </div>
-                                </div>
-                                <div className="bg-muted/30 rounded-lg p-4 text-center">
-                                    <div className="text-xs text-muted-foreground uppercase mb-1">Date</div>
-                                    <div className="font-medium text-sm">
-                                        {new Date(selectedDecision.created_at).toLocaleDateString()}
+                                    <div className="kpi text-center">
+                                        <p className="kpi-label">Max Allowed</p>
+                                        <p className="kpi-value font-mono">{selectedDecision.allowed_amount != null ? `$${selectedDecision.allowed_amount.toLocaleString()}` : "—"}</p>
+                                    </div>
+                                    <div className="kpi text-center">
+                                        <p className="kpi-label">Approved</p>
+                                        <p className="kpi-value font-mono text-up">{selectedDecision.approved_amount != null ? `$${selectedDecision.approved_amount.toLocaleString()}` : "—"}</p>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Amount Info */}
-                            {(selectedDecision.allowed_amount || selectedDecision.approved_amount) && (
-                                <div className="border rounded-lg p-4">
-                                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                                        <FileText className="h-4 w-4" /> Amount Decision
-                                    </h3>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        {selectedDecision.allowed_amount && (
-                                            <div>
-                                                <div className="text-xs text-muted-foreground">Max Allowed Amount</div>
-                                                <div className="text-xl font-bold font-mono">
-                                                    ${selectedDecision.allowed_amount.toLocaleString()}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {selectedDecision.approved_amount && (
-                                            <div>
-                                                <div className="text-xs text-muted-foreground">Approved Amount</div>
-                                                <div className="text-xl font-bold font-mono text-green-700">
-                                                    ${selectedDecision.approved_amount.toLocaleString()}
-                                                </div>
-                                            </div>
-                                        )}
+                            {/* Fraud Assessment */}
+                            <div className="panel p-4">
+                                <p className="panel-title flex items-center gap-1.5 mb-3">
+                                    <ShieldAlert className="h-3.5 w-3.5 text-down" /> Fraud Risk Assessment
+                                </p>
+                                {selectedDecision.fraud_score != null ? (
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div className="kpi text-center">
+                                            <p className="kpi-label">Fraud Probability</p>
+                                            <p className="kpi-value font-mono">{(selectedDecision.fraud_score * 100).toFixed(2)}%</p>
+                                        </div>
+                                        <div className="kpi text-center">
+                                            <p className="kpi-label">Risk Tier</p>
+                                            <span className={cn("badge", FRAUD_TIER_COLORS[selectedDecision.fraud_tier || ""] || "badge-muted")}>
+                                                {selectedDecision.fraud_tier || "—"}
+                                            </span>
+                                        </div>
+                                        <div className="kpi text-center">
+                                            <p className="kpi-label">Recommended Action</p>
+                                            <p className="text-xs font-semibold mt-1">{selectedDecision.fraud_action || "—"}</p>
+                                        </div>
                                     </div>
-                                </div>
-                            )}
+                                ) : (
+                                    <p className="text-xs text-muted-foreground">No fraud model was active when this decision was made.</p>
+                                )}
+                            </div>
 
-                            {/* Reason Codes */}
-                            {selectedDecision.reason_codes && selectedDecision.reason_codes.length > 0 && (
-                                <div className="border rounded-lg p-4">
-                                    <h3 className="text-sm font-semibold mb-3">Key Factors</h3>
-                                    <div className="space-y-2">
-                                        {selectedDecision.reason_codes.map((rc: ReasonCode, idx: number) => (
-                                            <div
-                                                key={idx}
-                                                className={cn(
-                                                    "flex items-center justify-between p-3 rounded-lg",
-                                                    rc.direction === "positive" ? "bg-green-50" : "bg-red-50"
-                                                )}
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    {rc.direction === "positive" ? (
-                                                        <TrendingUp className="h-4 w-4 text-green-600" />
-                                                    ) : (
-                                                        <TrendingDown className="h-4 w-4 text-red-600" />
-                                                    )}
-                                                    <span className="font-medium capitalize">
-                                                        {rc.feature.replace(/_/g, " ")}
+                            {/* Adverse Action Factors */}
+                            {selectedDecision.adverse_action_factors && selectedDecision.adverse_action_factors.length > 0 && (
+                                <div className="panel p-4">
+                                    <p className="panel-title mb-3">Adverse Action Factors (SHAP)</p>
+                                    <div className="space-y-1.5">
+                                        {selectedDecision.adverse_action_factors.map((f: any, i: number) => (
+                                            <div key={i} className="flex items-center justify-between px-3 py-2 rounded bg-muted/20">
+                                                <span className="text-xs font-medium capitalize">{(f.factor || "").replace(/_/g, " ")}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={cn("text-2xs px-1.5 py-0.5 rounded",
+                                                        f.direction === "risk_increasing" ? "bg-down/10 text-down" : "bg-up/10 text-up"
+                                                    )}>
+                                                        {f.direction === "risk_increasing" ? "Risk +" : "Risk -"}
                                                     </span>
+                                                    <span className="font-mono text-xs">{(f.impact * 100).toFixed(2)}%</span>
                                                 </div>
-                                                <span className={cn(
-                                                    "font-mono font-bold",
-                                                    rc.direction === "positive" ? "text-green-700" : "text-red-700"
-                                                )}>
-                                                    {rc.direction === "positive" ? "+" : ""}{(rc.impact * 100).toFixed(2)}%
-                                                </span>
                                             </div>
                                         ))}
                                     </div>
+                                    <p className="text-[10px] text-muted-foreground mt-2">Methodology: SHAP · Regulatory: ECOA / FCRA Reg B</p>
                                 </div>
                             )}
 
-                            {/* Input Payload */}
-                            {selectedDecision.input_payload && Object.keys(selectedDecision.input_payload).length > 0 && (
-                                <div className="border rounded-lg p-4">
-                                    <h3 className="text-sm font-semibold mb-3">Input Data</h3>
-                                    <div className="bg-muted/30 rounded-lg p-4 overflow-x-auto">
-                                        <table className="w-full text-sm">
-                                            <tbody>
-                                                {Object.entries(selectedDecision.input_payload).map(([key, value]) => (
-                                                    <tr key={key} className="border-b last:border-0">
-                                                        <td className="py-2 pr-4 text-muted-foreground capitalize">
-                                                            {key.replace(/_/g, " ")}
-                                                        </td>
-                                                        <td className="py-2 font-mono font-medium text-right">
-                                                            {typeof value === "number"
-                                                                ? value.toLocaleString()
-                                                                : String(value)}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* System & ID Info */}
-                            <div className="text-xs text-muted-foreground border-t pt-4 flex justify-between">
-                                <span>
-                                    System: {systems?.find(s => s.id === selectedDecision.decision_system_id)?.name || selectedDecision.decision_system_id}
-                                </span>
-                                <span className="font-mono">ID: {selectedDecision.id}</span>
+                            {/* Pipeline Metadata */}
+                            <div className="panel overflow-hidden">
+                                <div className="panel-head"><span className="panel-title">Pipeline Metadata</span></div>
+                                <table className="dt w-full text-xs">
+                                    <tbody>
+                                        <tr>
+                                            <td className="text-muted-foreground">System</td>
+                                            <td className="font-mono text-right">{systemName(selectedDecision.decision_system_id)}</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="text-muted-foreground">Credit Model</td>
+                                            <td className="font-mono text-right text-2xs">{selectedDecision.model_version_id || "—"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="text-muted-foreground">Fraud Model</td>
+                                            <td className="font-mono text-right text-2xs">{selectedDecision.fraud_model_id || "—"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="text-muted-foreground">Policy</td>
+                                            <td className="font-mono text-right text-2xs">{selectedDecision.policy_version_id || "—"}</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="text-muted-foreground">Inquiry ID</td>
+                                            <td className="font-mono text-right text-2xs">{selectedDecision.id}</td>
+                                        </tr>
+                                        <tr>
+                                            <td className="text-muted-foreground">Timestamp</td>
+                                            <td className="font-mono text-right">{(() => { const dt = formatDateTime(selectedDecision.timestamp); return `${dt.date} ${dt.time}`; })()}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
+
+                            {/* Input Payload (collapsed) */}
+                            {selectedDecision.input_payload && Object.keys(selectedDecision.input_payload).length > 0 && (
+                                <details className="panel overflow-hidden">
+                                    <summary className="panel-head cursor-pointer select-none">
+                                        <span className="panel-title">Input Payload</span>
+                                    </summary>
+                                    <pre className="p-4 text-xs font-mono bg-slate-950 text-slate-300 overflow-x-auto">
+                                        {JSON.stringify(selectedDecision.input_payload, null, 2)}
+                                    </pre>
+                                </details>
+                            )}
                         </div>
 
-                        {/* Modal Footer */}
-                        <div className="p-4 border-t bg-muted/20 flex justify-end">
-                            <button
-                                onClick={() => setSelectedDecision(null)}
-                                className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
-                            >
-                                Close
-                            </button>
+                        <div className="px-5 py-3 border-t bg-muted/20 flex justify-end">
+                            <button onClick={() => setSelectedDecision(null)} className="btn-primary btn-sm">Close</button>
                         </div>
                     </div>
                 </div>
             )}
         </div>
+    );
+}
+
+// Sortable table header component
+function Th({ field, label, sortField, sortDir, toggle }: {
+    field: SortField; label: string;
+    sortField: SortField; sortDir: SortDir;
+    toggle: (f: SortField) => void;
+}) {
+    return (
+        <th className="text-xs">
+            <button
+                onClick={() => toggle(field)}
+                className="flex items-center gap-1 hover:text-foreground transition-colors w-full"
+            >
+                {label}
+                {sortField === field
+                    ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />)
+                    : <ArrowUpDown className="h-3 w-3 text-muted-foreground/40" />}
+            </button>
+        </th>
     );
 }

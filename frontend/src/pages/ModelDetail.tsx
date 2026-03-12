@@ -1,17 +1,18 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { ArrowLeft, BarChart2, Shield } from "lucide-react";
+import { ArrowLeft, BarChart2, Shield, FileDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
 
 export default function ModelDetail() {
     const { systemId, id } = useParams<{ systemId: string, id: string }>();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
+    const [docLoading, setDocLoading] = useState(false);
 
-    // Fetch Model
     const { data: model, isLoading } = useQuery<MLModel>({
         queryKey: ["model", id],
         queryFn: async () => {
@@ -21,7 +22,6 @@ export default function ModelDetail() {
         enabled: !!id
     });
 
-    // Activate Mutation
     const activateMutation = useMutation({
         mutationFn: async () => {
             await api.post(`/models/${id}/activate`, {});
@@ -29,18 +29,54 @@ export default function ModelDetail() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["model", id] });
             queryClient.invalidateQueries({ queryKey: ["models", systemId] });
-            queryClient.invalidateQueries({ queryKey: ["system", systemId] }); // Critical: Updates active_model_id in SystemLayout
+            queryClient.invalidateQueries({ queryKey: ["system", systemId] });
         },
     });
+
+    const handleDownloadDoc = async () => {
+        if (!id) return;
+        setDocLoading(true);
+        try {
+            const res = await api.get(`/models/${id}/documentation`, { responseType: 'blob' });
+            const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+            const url = URL.createObjectURL(new Blob([res.data], { type: mime }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sentinel_model_doc_${model?.name || id}.docx`;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 200);
+        } catch (e) {
+            console.error('Documentation generation failed', e);
+        } finally {
+            setDocLoading(false);
+        }
+    };
 
     if (isLoading) return <div className="p-12 text-center text-muted-foreground">Loading model details...</div>;
     if (!model) return <div className="p-12 text-center text-red-500">Model not found.</div>;
 
     const featureImportance = model.metrics?.feature_importance || [];
+    const calibration = model.metrics?.calibration || [];
+    const auc = model.metrics?.auc || 0;
+    const gini = model.metrics?.gini ?? (2 * auc - 1);
+    const cvMean = model.metrics?.cv_auc_mean;
+    const cvStd = model.metrics?.cv_auc_std;
+    const dataProfile = model.metrics?.data_profile;
+
+    // Average bad rate for reference line
+    const avgBadRate = calibration.length > 0
+        ? calibration.reduce((sum: number, d: any) => sum + d.actual_rate * d.count, 0) /
+          calibration.reduce((sum: number, d: any) => sum + d.count, 0)
+        : null;
 
     return (
-        <div className="p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in zoom-in-95">
-            {/* Header / Nav */}
+        <div className="page animate-in fade-in zoom-in-95">
+            {/* Header */}
             <div className="flex items-start justify-between">
                 <div>
                     <button
@@ -49,29 +85,34 @@ export default function ModelDetail() {
                     >
                         <ArrowLeft className="mr-2 h-4 w-4" /> Back to Model Registry
                     </button>
-                    <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+                    <h1 className="page-title flex items-center gap-3">
                         {model.name || "Untitled Model"}
                         {model.status === "ACTIVE" && (
-                            <span className="bg-green-100 text-green-800 text-sm font-bold px-3 py-1 rounded-full flex items-center gap-1">
+                            <span className="badge badge-green">
                                 <Shield className="h-3 w-3" /> ACTIVE CHAMPION
                             </span>
                         )}
                     </h1>
-                    <p className="text-muted-foreground mt-2 font-mono text-sm">
+                    <p className="text-xs text-muted-foreground mt-1 font-mono">
                         ID: {model.id} • Algorithm: <span className="capitalize text-foreground font-medium">{model.algorithm?.replace("_", " ")}</span>
                     </p>
                 </div>
-
                 <div className="flex gap-3">
+                    <button
+                        onClick={handleDownloadDoc}
+                        disabled={docLoading}
+                        className="btn-outline gap-2"
+                    >
+                        {docLoading
+                            ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
+                            : <><FileDown className="h-4 w-4" /> Generate Model Documentation</>
+                        }
+                    </button>
                     {model.status !== "ACTIVE" && (
                         <button
                             onClick={() => activateMutation.mutate()}
                             disabled={activateMutation.isPending}
-                            className={cn(
-                                "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
-                                "bg-primary text-primary-foreground shadow hover:bg-primary/90",
-                                "h-10 px-8 py-2"
-                            )}
+                            className="btn-primary gap-2"
                         >
                             {activateMutation.isPending ? "Activating..." : "Activate for Decisioning"}
                         </button>
@@ -82,46 +123,99 @@ export default function ModelDetail() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Left Col: Performance */}
                 <div className="lg:col-span-1 space-y-6">
-                    <div className="bg-card border rounded-xl p-6 shadow-sm">
-                        <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                    <div className="panel p-5">
+                        <h3 className="panel-title flex items-center gap-2 mb-3">
                             <BarChart2 className="h-5 w-5 text-blue-500" />
-                            Performance Summary
+                            Performance
                         </h3>
 
-                        <div className="space-y-6">
+                        <div className="space-y-5">
+                            {/* AUC */}
                             <div>
-                                <p className="text-sm text-muted-foreground uppercase font-bold tracking-wider">AUC (Discrimination)</p>
+                                <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">AUC — Discrimination</p>
                                 <div className="flex items-end gap-2 mt-1">
                                     <span className={cn(
-                                        "text-4xl font-bold",
-                                        (model.metrics?.auc || 0) > 0.8 ? "text-green-600" : "text-yellow-600"
+                                        "text-3xl font-bold num",
+                                        auc > 0.8 ? "text-up" : "text-warn"
                                     )}>
-                                        {((model.metrics?.auc || 0) * 100).toFixed(2)}%
-                                    </span>
-                                    <span className="text-sm text-muted-foreground mb-1">
-                                        / 100%
+                                        {(auc * 100).toFixed(2)}%
                                     </span>
                                 </div>
-                                <p className="text-xs text-muted-foreground mt-2">
-                                    Measures how well the model separates good vs. bad loans. Higher is better.
+                                {cvMean != null && (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        5-fold CV: <span className="font-mono font-medium text-foreground">{(cvMean * 100).toFixed(1)}%</span>
+                                        {cvStd != null && <span className="text-muted-foreground"> ± {(cvStd * 100).toFixed(1)}%</span>}
+                                    </p>
+                                )}
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    How well the model separates good vs. bad loans.
                                 </p>
                             </div>
 
-                            <div className="pt-4 border-t">
-                                <p className="text-sm text-muted-foreground uppercase font-bold tracking-wider mb-2">Dataset Info</p>
-                                <div className="text-sm">
-                                    <div className="flex justify-between py-1">
-                                        <span>Training Set</span>
-                                        <span className="font-medium">80%</span>
-                                    </div>
-                                    <div className="flex justify-between py-1">
-                                        <span>Validation Set</span>
-                                        <span className="font-medium">20%</span>
-                                    </div>
-                                    <div className="flex justify-between py-1">
-                                        <span>Target</span>
-                                        <span className="font-mono bg-muted px-1 rounded">Charge_Off</span>
-                                    </div>
+                            {/* Gini */}
+                            <div className="pt-3 border-t">
+                                <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Gini Coefficient</p>
+                                <p className={cn(
+                                    "text-2xl font-bold mt-1",
+                                    gini > 0.6 ? "text-up" : "text-warn"
+                                )}>
+                                    {(gini * 100).toFixed(1)}%
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">Gini = 2 × AUC − 1. Industry benchmark: &gt;60%.</p>
+                            </div>
+
+                            {/* Data Profile */}
+                            <div className="pt-3 border-t">
+                                <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider mb-2">Training Data</p>
+                                <div className="text-sm space-y-1">
+                                    {dataProfile ? (
+                                        <>
+                                            <div className="flex justify-between py-0.5">
+                                                <span className="text-muted-foreground">Total observations</span>
+                                                <span className="font-medium">{dataProfile.total_rows?.toLocaleString()}</span>
+                                            </div>
+                                            {dataProfile.sampled && (
+                                                <div className="flex justify-between py-0.5">
+                                                    <span className="text-muted-foreground">Used in training</span>
+                                                    <span className="font-medium text-warn">{dataProfile.total_rows_used?.toLocaleString()} (sampled)</span>
+                                                </div>
+                                            )}
+                                            <div className="flex justify-between py-0.5">
+                                                <span className="text-muted-foreground">Train sample</span>
+                                                <span className="font-medium">{dataProfile.train_rows?.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex justify-between py-0.5">
+                                                <span className="text-muted-foreground">Test sample</span>
+                                                <span className="font-medium">{dataProfile.test_rows?.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex justify-between py-0.5">
+                                                <span className="text-muted-foreground">Target column</span>
+                                                <span className="font-mono bg-muted px-1 rounded text-xs">{dataProfile.target_col}</span>
+                                            </div>
+                                            <div className="flex justify-between py-0.5">
+                                                <span className="text-muted-foreground">Features</span>
+                                                <span className="font-medium">{dataProfile.feature_count}</span>
+                                            </div>
+                                            <div className="flex justify-between py-0.5">
+                                                <span className="text-muted-foreground">Default rate</span>
+                                                <span className="font-medium">{((dataProfile.class_balance || 0) * 100).toFixed(1)}%</span>
+                                            </div>
+                                            {dataProfile.missing_pct > 0 && (
+                                                <div className="flex justify-between py-0.5">
+                                                    <span className="text-muted-foreground">Missing values</span>
+                                                    <span className="font-medium text-warn">{dataProfile.missing_pct.toFixed(1)}%</span>
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="flex justify-between py-0.5">
+                                                <span className="text-muted-foreground">Train / Test split</span>
+                                                <span className="font-medium">80% / 20%</span>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground pt-1">Retrain to see observation counts and target column.</p>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -130,70 +224,42 @@ export default function ModelDetail() {
 
                 {/* Right Col: Feature Importance & Lift Chart */}
                 <div className="lg:col-span-2 space-y-8">
-                    {/* Feature Importance */}
-                    <div className="bg-card border rounded-xl p-6 shadow-sm">
-                        <h3 className="font-semibold text-lg mb-2">Top Contributing Drivers</h3>
+                    {/* Feature Importance — SHAP-colored bars, no table */}
+                    <div className="panel p-5">
+                        <h3 className="text-sm font-semibold mb-1">Top Risk Drivers</h3>
                         <p className="text-sm text-muted-foreground mb-6">
-                            These attributes most influenced predictions during validation.
+                            SHAP-based importance. <span className="text-down font-medium">Red</span> = increases charge-off risk, <span className="text-up font-medium">green</span> = decreases it.
                         </p>
 
                         {featureImportance.length > 0 ? (
-                            <div className="space-y-6">
-                                {/* Chart */}
-                                <div className="h-[300px] w-full">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart
-                                            layout="vertical"
-                                            data={featureImportance}
-                                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                                        >
-                                            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                                            <XAxis type="number" hide />
-                                            <YAxis dataKey="feature" type="category" width={150} tick={{ fontSize: 12 }} />
-                                            <Tooltip
-                                                formatter={(value: any) => value.toFixed(4)}
-                                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                                            />
-                                            <Bar dataKey="importance" radius={[0, 4, 4, 0]} barSize={20}>
-                                                {featureImportance.map((_: any, index: number) => (
-                                                    <Cell key={`cell-${index}`} fill="#3b82f6" fillOpacity={1 - (index * 0.05)} />
-                                                ))}
-                                            </Bar>
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-
-                                {/* Table */}
-                                <div className="overflow-hidden border rounded-lg">
-                                    <table className="w-full text-sm text-left">
-                                        <thead className="bg-muted/50 text-muted-foreground uppercase font-medium text-xs">
-                                            <tr>
-                                                <th className="px-4 py-3">Attribute</th>
-                                                <th className="px-4 py-3">Impact Direction</th>
-                                                <th className="px-4 py-3 text-right">Relative Importance</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {featureImportance.map((feat: any, i: number) => (
-                                                <tr key={i} className="hover:bg-muted/50">
-                                                    <td className="px-4 py-3 font-medium">{feat.feature}</td>
-                                                    <td className="px-4 py-3">
-                                                        <span className={cn(
-                                                            "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium",
-                                                            feat.impact?.includes("Increases") ? "bg-red-50 text-red-700" :
-                                                                feat.impact?.includes("Decreases") ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-700"
-                                                        )}>
-                                                            {feat.impact || "Variable"}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-                                                        {feat.importance.toFixed(4)}
-                                                    </td>
-                                                </tr>
+                            <div className="h-[300px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart
+                                        layout="vertical"
+                                        data={featureImportance}
+                                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
+                                        <XAxis type="number" hide />
+                                        <YAxis dataKey="feature" type="category" width={150} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                        <Tooltip
+                                            formatter={(value: any, _name: any, props: any) => [
+                                                `${value.toFixed(4)} (${props.payload.impact})`,
+                                                "SHAP Importance"
+                                            ]}
+                                            contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
+                                        />
+                                        <Bar dataKey="importance" radius={[0, 4, 4, 0]} barSize={20}>
+                                            {featureImportance.map((feat: any, index: number) => (
+                                                <Cell
+                                                    key={`cell-${index}`}
+                                                    fill={feat.impact?.includes("Increases") ? "#ef4444" : "#22c55e"}
+                                                    fillOpacity={1 - index * 0.04}
+                                                />
                                             ))}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
                             </div>
                         ) : (
                             <div className="p-12 text-center text-muted-foreground bg-muted/20 rounded-lg">
@@ -203,60 +269,80 @@ export default function ModelDetail() {
                     </div>
 
                     {/* Lift / Decile Chart */}
-                    <div className="bg-card border rounded-xl p-6 shadow-sm">
-                        <h3 className="font-semibold text-lg mb-2">Lift Chart (Risk Calibration)</h3>
-                        <p className="text-sm text-muted-foreground mb-6">
-                            Actual Risk vs. Predicted Risk across Deciles. A steep slope indicates strong separation (Lift).
+                    <div className="panel p-5">
+                        <div className="flex items-start justify-between mb-1">
+                            <h3 className="text-sm font-semibold">Risk by Decile</h3>
+                            <span className="badge badge-muted text-xs">Out-of-sample (test set only)</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-1">
+                            Actual default rate per score decile. A steep slope from left to right indicates strong model lift.
+                            Dashed line shows the population average.
                         </p>
+                        {dataProfile?.test_rows && (
+                            <p className="text-xs text-muted-foreground mb-4">
+                                Based on <span className="font-medium text-foreground">{dataProfile.test_rows.toLocaleString()}</span> held-out test observations (20% of training data, never seen by the model).
+                            </p>
+                        )}
+                        {!dataProfile?.test_rows && <div className="mb-4" />}
 
-                        {model.metrics?.calibration && model.metrics.calibration.length > 0 ? (
+                        {calibration.length > 0 ? (
                             <div className="h-[350px] w-full">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart
-                                        data={model.metrics.calibration}
+                                        data={calibration}
                                         margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
                                     >
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                                         <XAxis
                                             dataKey="decile"
-                                            label={{ value: 'Risk Decile (Lowest to Highest)', position: 'insideBottom', offset: -5 }}
+                                            label={{ value: 'Score Decile (Low Risk → High Risk)', position: 'insideBottom', offset: -5 }}
                                             tickLine={false}
+                                            tick={{ fill: "hsl(var(--muted-foreground))" }}
                                         />
-                                        <YAxis label={{ value: 'Bad Rate', angle: -90, position: 'insideLeft' }} />
+                                        <YAxis
+                                            tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+                                            label={{ value: 'Default Rate', angle: -90, position: 'insideLeft' }}
+                                            tick={{ fill: "hsl(var(--muted-foreground))" }}
+                                        />
                                         <Tooltip
                                             cursor={{ fill: 'transparent' }}
                                             content={({ active, payload, label }) => {
                                                 if (active && payload && payload.length) {
                                                     const data = payload[0].payload;
                                                     return (
-                                                        <div className="bg-white p-3 border rounded-lg shadow-lg text-xs">
+                                                        <div style={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", padding: "8px 12px" }} className="text-xs">
                                                             <p className="font-bold mb-1">Decile {label}</p>
-                                                            <p className="text-blue-600">Actual Bad Rate: {(data.actual_rate * 100).toFixed(2)}%</p>
-                                                            <p className="text-orange-500">Predicted Risk: {(data.mean_score * 100).toFixed(2)}%</p>
-                                                            <div className="mt-2 text-gray-400 text-[10px]">
-                                                                Count: {data.count} | Min Score: {data.min_score.toFixed(3)}
-                                                            </div>
+                                                            <p className="text-info">Default Rate: {(data.actual_rate * 100).toFixed(2)}%</p>
+                                                            <p className="text-muted-foreground mt-1">Count: {data.count} | Score: {data.min_score?.toFixed(3)}–{data.max_score?.toFixed(3)}</p>
                                                         </div>
                                                     );
                                                 }
                                                 return null;
                                             }}
                                         />
-                                        <Bar dataKey="actual_rate" fill="#3b82f6" name="Actual Bad Rate" radius={[4, 4, 0, 0]} />
+                                        {avgBadRate != null && (
+                                            <ReferenceLine
+                                                y={avgBadRate}
+                                                stroke="#f97316"
+                                                strokeDasharray="5 5"
+                                                label={{ value: `Avg ${(avgBadRate * 100).toFixed(1)}%`, position: 'right', fontSize: 10, fill: '#f97316' }}
+                                            />
+                                        )}
+                                        <Bar dataKey="actual_rate" radius={[4, 4, 0, 0]}>
+                                            {calibration.map((entry: any, index: number) => (
+                                                <Cell
+                                                    key={`cell-${index}`}
+                                                    fill={entry.actual_rate > (avgBadRate ?? 0) ? "#ef4444" : "#3b82f6"}
+                                                    fillOpacity={0.85}
+                                                />
+                                            ))}
+                                        </Bar>
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
                         ) : (
                             <div className="p-12 text-center text-muted-foreground bg-muted/20 rounded-lg">
                                 Calibration data not available.
-                            </div>
-                        )}
-
-                        {/* Note on interpretation */}
-                        {model.metrics?.calibration && (
-                            <div className="mt-4 p-4 bg-blue-50 text-blue-800 rounded-md text-sm">
-                                <span className="font-bold">Interpretation:</span> Decile 1 represents the lowest predicted risk, and Decile 10 the highest.
-                                Ideally, the "Actual Bad Rate" should increase monotonically from Decile 1 to 10.
                             </div>
                         )}
                     </div>

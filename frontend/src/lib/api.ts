@@ -17,6 +17,23 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
+// Handle authentication errors (403/401) - clear token and redirect to login
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response?.status === 403 || error.response?.status === 401) {
+            // Clear invalid token
+            localStorage.removeItem("token");
+            localStorage.removeItem("user");
+            // Redirect to login
+            if (typeof window !== 'undefined') {
+                window.location.href = '/login';
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
 // Standardized API Types
 
 export interface Dataset {
@@ -42,11 +59,21 @@ export interface MLModel {
     status: "TRAINING" | "CANDIDATE" | "ACTIVE" | "ARCHIVED" | "FAILED";
     metrics?: {
         auc?: number;
+        gini?: number;
         accuracy?: number;
         f1?: number;
-        calibration?: any[]; // Array of decile blobs
+        cv_auc_mean?: number;
+        cv_auc_std?: number;
+        cv_fold_scores?: number[];
+        classification_metrics?: {
+            f1?: number; tpr?: number; fpr?: number; tnr?: number;
+            ppv?: number; npv?: number; accuracy?: number; mcc?: number;
+        };
+        calibration?: any[];
         confusion_matrix?: any;
-        feature_importance?: any[]; // Array of {feature, importance}
+        feature_importance?: any[];
+        feature_stats?: any[];
+        data_profile?: any;
     };
     created_at: string;
 }
@@ -69,14 +96,14 @@ export type SystemModule =
     | "fraud_detection"
     | "exposure_control";
 
+export type SystemType = "credit" | "fraud" | "full";
+
 export interface DecisionSystem {
     id: string;
     name: string;
     description?: string;
+    system_type: SystemType;
     created_at: string;
-
-    // Enabled modules
-    enabled_modules: SystemModule[];
 
     // Active pointers
     active_model_id?: string;
@@ -350,3 +377,410 @@ export interface FraudAutomationSettings {
     batch_review_enabled: boolean;
     batch_size_limit: number;
 }
+
+// ============================================================
+// API METHODS
+// ============================================================
+
+// ==================== Authentication ====================
+
+export interface LoginRequest {
+    username: string;
+    password: string;
+}
+
+export interface LoginResponse {
+    access_token: string;
+    token_type: string;
+    client_id: string;
+    role: string;
+}
+
+export const authAPI = {
+    login: (data: LoginRequest) => 
+        api.post<LoginResponse>('/auth/login/access-token', 
+            new URLSearchParams({
+                username: data.username,
+                password: data.password
+            }), 
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        ),
+};
+
+// ==================== Decision Systems ====================
+
+export interface CreateSystemRequest {
+    name: string;
+    description?: string;
+    system_type?: SystemType;
+}
+
+export const systemsAPI = {
+    list: () => api.get<DecisionSystem[]>('/systems'),
+    get: (id: string) => api.get<DecisionSystem>(`/systems/${id}`),
+    create: (data: CreateSystemRequest) => api.post<DecisionSystem>('/systems', data),
+    delete: (id: string) => api.delete(`/systems/${id}`),
+    upgrade: (id: string) => api.post(`/systems/${id}/upgrade`),
+};
+
+// ==================== Datasets ====================
+
+export const datasetsAPI = {
+    list: (systemId?: string) => 
+        api.get<Dataset[]>('/datasets', { params: systemId ? { system_id: systemId } : {} }),
+    
+    upload: (systemId: string, file: File) => {
+        const formData = new FormData();
+        formData.append('system_id', systemId);
+        formData.append('file', file);
+        return api.post<Dataset>('/datasets/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+    },
+    
+    preview: (datasetId: string) => 
+        api.get<{ rows: any[], columns: { name: string, type: string, sample: string }[] }>(
+            `/datasets/${datasetId}/preview`
+        ),
+    
+    delete: (datasetId: string) => api.delete(`/datasets/${datasetId}`),
+
+    segmentColumns: (datasetId: string) =>
+        api.get<{ column: string; values: string[] }[]>(`/datasets/${datasetId}/segment-columns`),
+};
+
+// ==================== Models ====================
+
+export interface TrainModelRequest {
+    target_col?: string;
+    feature_cols?: string[];
+}
+
+export const modelsAPI = {
+    list: (systemId?: string) => 
+        api.get<MLModel[]>('/models', { params: systemId ? { system_id: systemId } : {} }),
+    
+    get: (modelId: string) => api.get<MLModel>(`/models/${modelId}`),
+    
+    train: (datasetId: string, data: TrainModelRequest) => 
+        api.post<{ message: string, models: Record<string, string> }>(
+            `/models/${datasetId}/train`, 
+            data
+        ),
+    
+    activate: (modelId: string) => 
+        api.post<{ message: string, model: MLModel }>(`/models/${modelId}/activate`),
+    
+    delete: (modelId: string) => api.delete(`/models/${modelId}`),
+};
+
+// ==================== Policy Segments ====================
+
+export interface PolicySegment {
+    id: string;
+    policy_id: string;
+    name: string;
+    filters: Record<string, string>;
+    specificity: number;
+    threshold: number | null;
+    override_threshold: number | null;
+    override_reason?: string | null;
+    override_by?: string | null;
+    n_samples: number | null;
+    default_rate: number | null;
+    confidence_score: number | null;
+    confidence_tier: "green" | "yellow" | "red" | null;
+    projected_approval_rate: number | null;
+    fallback_segment_id: string | null;
+    is_global: boolean;
+    is_active: boolean;
+    created_at: string;
+}
+
+export interface SegmentCreate {
+    name: string;
+    filters: Record<string, string>;
+    threshold?: number | null;
+}
+
+export interface SegmentUpdate {
+    name?: string;
+    override_threshold?: number | null;
+    override_reason?: string | null;
+}
+
+export const segmentsAPI = {
+    list: (policyId: string) =>
+        api.get<PolicySegment[]>(`/policies/${policyId}/segments`),
+
+    create: (policyId: string, data: SegmentCreate) =>
+        api.post<PolicySegment>(`/policies/${policyId}/segments`, data),
+
+    update: (policyId: string, segmentId: string, data: SegmentUpdate) =>
+        api.put<PolicySegment>(`/policies/${policyId}/segments/${segmentId}`, data),
+
+    delete: (policyId: string, segmentId: string) =>
+        api.delete(`/policies/${policyId}/segments/${segmentId}`),
+
+    calibrate: (policyId: string, opts?: { target_bad_rate?: number }) =>
+        api.post<PolicySegment[]>(`/policies/${policyId}/segments/calibrate`, opts ?? {}),
+
+    calibration: (policyId: string, segmentId: string) =>
+        api.get<{ segment_id: string; n_samples: number; calibration: any[] }>(
+            `/policies/${policyId}/segments/${segmentId}/calibration`
+        ),
+};
+
+// ==================== Policies ====================
+
+export interface CreatePolicyRequest {
+    model_id: string;
+    threshold: number;
+    projected_approval_rate?: number;
+    projected_loss_rate?: number;
+    target_decile?: number;
+    amount_ladder?: Record<string, any>;
+}
+
+export interface LoanAmountLadderRequest {
+    dataset_id: string;
+    model_id: string;
+    threshold: number;
+}
+
+export const policiesAPI = {
+    list: (systemId?: string) => 
+        api.get<Policy[]>('/policies', { params: systemId ? { system_id: systemId } : {} }),
+    
+    create: (data: CreatePolicyRequest) => api.post<Policy>('/policies', data),
+    
+    activate: (policyId: string) => 
+        api.put<Policy>(`/policies/${policyId}/activate`),
+    
+    recommendAmounts: (data: LoanAmountLadderRequest) => 
+        api.post<any>('/policies/recommend-amounts', data),
+    
+    delete: (policyId: string) => api.delete(`/policies/${policyId}`),
+};
+
+// ==================== Decisions ====================
+
+export interface MakeDecisionRequest {
+    applicant_name?: string;
+    applicant_ssn?: string;
+    inputs: Record<string, any>;
+}
+
+export const decisionsAPI = {
+    make: (systemId: string, data: MakeDecisionRequest) => 
+        api.post<DecisionRecord>(`/decisions/${systemId}`, data),
+    
+    list: (params?: { 
+        system_id?: string, 
+        applicant_name?: string, 
+        skip?: number, 
+        limit?: number 
+    }) => api.get<DecisionRecord[]>('/decisions', { params }),
+    
+    get: (decisionId: string) => api.get<DecisionRecord>(`/decisions/${decisionId}`),
+    
+    stats: (systemId: string, days?: number) => 
+        api.get<DecisionStats>('/decisions/stats/overview', { 
+            params: { system_id: systemId, days: days || 7 } 
+        }),
+    
+    predict: (modelId: string, inputs: Record<string, any>) => 
+        api.post<{ score: number }>('/decisions/predict', { model_id: modelId, inputs }),
+};
+
+// ==================== Dashboard ====================
+
+export const dashboardAPI = {
+    stats: () => api.get<{ volume_24h: number, approval_rate_24h: number }>('/dashboard/stats'),
+    
+    deploymentStatus: () => api.get<{
+        status: string,
+        model?: { name: string, version: string, algorithm: string },
+        policy?: { name: string, target_decile?: number, projected_approval: number }
+    }>('/dashboard/deployment-status'),
+    
+    volume: () => api.get<{ date: string, total: number, approved: number }[]>('/dashboard/volume'),
+};
+
+// ==================== Fraud Management ====================
+
+export interface CreateFraudCaseRequest {
+    application_id: string;
+    applicant_name: string;
+    applicant_email: string;
+    signals: Array<{
+        signal_type: string;
+        signal_name: string;
+        description?: string;
+        raw_value?: string;
+        risk_contribution: number;
+    }>;
+    total_score?: number;
+    identity_score?: number;
+    device_score?: number;
+    velocity_score?: number;
+    behavioral_score?: number;
+}
+
+export interface FraudCaseDecisionRequest {
+    decision: 'approved' | 'declined' | 'escalated';
+    reason: string;
+}
+
+export const fraudCasesAPI = {
+    list: (systemId: string, params?: Record<string, any>) => 
+        api.get<{ data: any[], meta: any }>(`/systems/${systemId}/fraud/cases`, { params }),
+    
+    get: (systemId: string, caseId: string) => 
+        api.get<any>(`/systems/${systemId}/fraud/cases/${caseId}`),
+    
+    create: (systemId: string, data: CreateFraudCaseRequest) => 
+        api.post<any>(`/systems/${systemId}/fraud/cases`, data),
+    
+    decide: (systemId: string, caseId: string, data: FraudCaseDecisionRequest) => 
+        api.post<any>(`/systems/${systemId}/fraud/cases/${caseId}/decide`, data),
+    
+    assign: (systemId: string, caseId: string, analystId: string) => 
+        api.post<any>(`/systems/${systemId}/fraud/cases/${caseId}/assign`, { analyst_id: analystId }),
+    
+    escalate: (systemId: string, caseId: string) => 
+        api.post<any>(`/systems/${systemId}/fraud/cases/${caseId}/escalate`),
+};
+
+export interface CreateVerificationRequest {
+    verification_type: 'otp_sms' | 'otp_email' | 'kba' | 'document_upload' | 'video_call' | 'manual_call';
+}
+
+export const verificationsAPI = {
+    list: (systemId: string, caseId: string) => 
+        api.get<any[]>(`/systems/${systemId}/fraud/cases/${caseId}/verifications`),
+    
+    create: (systemId: string, caseId: string, data: CreateVerificationRequest) => 
+        api.post<any>(`/systems/${systemId}/fraud/cases/${caseId}/verifications`, data),
+    
+    update: (systemId: string, caseId: string, verificationId: string, data: Record<string, any>) => 
+        api.patch<any>(`/systems/${systemId}/fraud/cases/${caseId}/verifications/${verificationId}`, data),
+};
+
+export interface CreateFraudRuleRequest {
+    name: string;
+    description?: string;
+    priority?: number;
+    conditions: Array<{
+        field: string;
+        operator: string;
+        value: any;
+    }>;
+    condition_logic?: 'AND' | 'OR';
+    action: string;
+    action_config?: Record<string, any>;
+}
+
+export const fraudRulesAPI = {
+    list: (systemId: string) => 
+        api.get<FraudRule[]>(`/systems/${systemId}/fraud/rules`),
+    
+    get: (systemId: string, ruleId: string) => 
+        api.get<FraudRule>(`/systems/${systemId}/fraud/rules/${ruleId}`),
+    
+    create: (systemId: string, data: CreateFraudRuleRequest) => 
+        api.post<FraudRule>(`/systems/${systemId}/fraud/rules`, data),
+    
+    update: (systemId: string, ruleId: string, data: Partial<CreateFraudRuleRequest>) => 
+        api.put<FraudRule>(`/systems/${systemId}/fraud/rules/${ruleId}`, data),
+    
+    delete: (systemId: string, ruleId: string) => 
+        api.delete(`/systems/${systemId}/fraud/rules/${ruleId}`),
+    
+    activate: (systemId: string, ruleId: string) => 
+        api.post<FraudRule>(`/systems/${systemId}/fraud/rules/${ruleId}/activate`),
+    
+    deactivate: (systemId: string, ruleId: string) => 
+        api.post<FraudRule>(`/systems/${systemId}/fraud/rules/${ruleId}/deactivate`),
+    
+    simulate: (systemId: string, data: Record<string, any>) => 
+        api.post<any>(`/systems/${systemId}/fraud/rules/simulate`, data),
+    
+    getFields: (systemId: string) => 
+        api.get<any>(`/systems/${systemId}/fraud/rules/fields`),
+};
+
+export interface CreateFraudModelRequest {
+    name: string;
+    description?: string;
+    algorithm: string;
+    training_config: Record<string, any>;
+}
+
+export const fraudModelsAPI = {
+    list: (systemId: string) => 
+        api.get<FraudModel[]>(`/systems/${systemId}/fraud/models`),
+    
+    get: (systemId: string, modelId: string) => 
+        api.get<FraudModel>(`/systems/${systemId}/fraud/models/${modelId}`),
+    
+    create: (systemId: string, data: CreateFraudModelRequest) => 
+        api.post<FraudModel>(`/systems/${systemId}/fraud/models`, data),
+    
+    delete: (systemId: string, modelId: string) => 
+        api.delete(`/systems/${systemId}/fraud/models/${modelId}`),
+    
+    train: (systemId: string, modelId: string) => 
+        api.post<any>(`/systems/${systemId}/fraud/models/${modelId}/train`),
+    
+    activate: (systemId: string, modelId: string) => 
+        api.post<FraudModel>(`/systems/${systemId}/fraud/models/${modelId}/activate`),
+    
+    archive: (systemId: string, modelId: string) => 
+        api.post<FraudModel>(`/systems/${systemId}/fraud/models/${modelId}/archive`),
+    
+    getFeatures: (systemId: string) => 
+        api.get<any>(`/systems/${systemId}/fraud/models/features`),
+};
+
+export const signalProvidersAPI = {
+    list: (systemId: string) => 
+        api.get<SignalProvider[]>(`/systems/${systemId}/fraud/signals/providers`),
+    
+    get: (systemId: string, providerId: string) => 
+        api.get<SignalProvider>(`/systems/${systemId}/fraud/signals/providers/${providerId}`),
+    
+    update: (systemId: string, providerId: string, data: Record<string, any>) => 
+        api.patch<SignalProvider>(`/systems/${systemId}/fraud/signals/providers/${providerId}`, data),
+    
+    test: (systemId: string, providerId: string) => 
+        api.post<any>(`/systems/${systemId}/fraud/signals/providers/${providerId}/test`),
+    
+    sync: (systemId: string, providerId: string) => 
+        api.post<any>(`/systems/${systemId}/fraud/signals/providers/${providerId}/sync`),
+};
+
+export const fraudAutomationAPI = {
+    get: (systemId: string) => 
+        api.get<FraudAutomationSettings>(`/systems/${systemId}/fraud/settings`),
+    
+    update: (systemId: string, data: Partial<FraudAutomationSettings>) => 
+        api.put<FraudAutomationSettings>(`/systems/${systemId}/fraud/settings`, data),
+};
+
+export const fraudAnalyticsAPI = {
+    overview: (systemId: string, params?: Record<string, any>) => 
+        api.get<FraudAnalytics>(`/systems/${systemId}/fraud/analytics`, { params }),
+    
+    queueDepth: (systemId: string) => 
+        api.get<Record<string, number>>(`/systems/${systemId}/fraud/analytics/queue-depth`),
+    
+    trend: (systemId: string, days?: number) => 
+        api.get<any[]>(`/systems/${systemId}/fraud/analytics/trend`, { params: { days: days || 7 } }),
+    
+    signals: (systemId: string, limit?: number) => 
+        api.get<any[]>(`/systems/${systemId}/fraud/analytics/signals`, { params: { limit: limit || 10 } }),
+    
+    analysts: (systemId: string) => 
+        api.get<any[]>(`/systems/${systemId}/fraud/analytics/analysts`),
+};

@@ -8,28 +8,27 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # API
-    API_V1_PREFIX: str = "/api/v1"
-    PROJECT_NAME: str = "Sentinel Decision Systems API"
+    API_V1_STR: str = "/api/v1"
+    PROJECT_NAME: str = "Sentinel Decision Systems"
     DEBUG: bool = False
+    ENV: str = "local"  # local, dev, prod
 
-    # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinel"
+    # Database (using synchronous SQLAlchemy with psycopg2)
+    DATABASE_URL: str = "postgresql://sentinel:sentinel_local@localhost:5432/sentinel"
     DATABASE_ECHO: bool = False
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
-    def convert_to_async_url(cls, v: str) -> str:
-        """Convert database URL to use asyncpg driver for async SQLAlchemy."""
-        if v.startswith("postgres://"):
-            return v.replace("postgres://", "postgresql+asyncpg://", 1)
-        if v.startswith("postgresql://"):
-            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+    def normalize_postgres_url(cls, v: str) -> str:
+        """Normalize postgres:// to postgresql:// for consistency."""
+        if v.startswith("postgres://") and not v.startswith("postgresql://"):
+            return v.replace("postgres://", "postgresql://", 1)
         return v
 
     # Authentication
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
 
     # CORS - comma-separated string or list
     CORS_ORIGINS: Union[str, list[str]] = "http://localhost:5173,http://localhost:3000,https://app.sentineldecisions.com,https://sentineldecisions.com"
@@ -41,6 +40,14 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
+
+    # S3 / Storage
+    AWS_ACCESS_KEY_ID: str = "minioadmin"
+    AWS_SECRET_ACCESS_KEY: str = "minioadmin"
+    AWS_ENDPOINT_URL: str = "http://localhost:9000"
+    S3_BUCKET_NAME: str = "sentinel-artifacts"
+    S3_REGION_NAME: str = "us-east-1"
+    STORAGE_TYPE: str = "local"  # local or s3
 
     class Config:
         env_file = ".env"

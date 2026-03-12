@@ -15,17 +15,17 @@ import {
 import { cn } from "@/lib/utils";
 
 const QUEUE_STYLES: Record<FraudRiskLevel, { bg: string; text: string; border: string }> = {
-    critical: { bg: "bg-red-100", text: "text-red-800", border: "border-red-300" },
-    high: { bg: "bg-orange-100", text: "text-orange-800", border: "border-orange-300" },
-    medium: { bg: "bg-yellow-100", text: "text-yellow-800", border: "border-yellow-300" },
-    low: { bg: "bg-green-100", text: "text-green-800", border: "border-green-300" },
+    critical: { bg: "bg-down/10", text: "text-down", border: "border-down/30" },
+    high: { bg: "bg-warn/10", text: "text-warn", border: "border-warn/30" },
+    medium: { bg: "bg-warn/10", text: "text-warn", border: "border-warn/20" },
+    low: { bg: "bg-up/10", text: "text-up", border: "border-up/30" },
 };
 
 const STATUS_STYLES: Record<FraudCaseStatus, { bg: string; text: string }> = {
-    pending: { bg: "bg-gray-100", text: "text-gray-700" },
-    in_review: { bg: "bg-blue-100", text: "text-blue-700" },
-    escalated: { bg: "bg-purple-100", text: "text-purple-700" },
-    resolved: { bg: "bg-green-100", text: "text-green-700" },
+    pending: { bg: "badge-muted", text: "" },
+    in_review: { bg: "badge-blue", text: "" },
+    escalated: { bg: "badge-muted", text: "" },
+    resolved: { bg: "badge-green", text: "" },
 };
 
 function formatTimeRemaining(deadline: string): { text: string; urgency: "ok" | "warning" | "critical" } {
@@ -133,11 +133,11 @@ export default function FraudQueue() {
     }), [allCases]);
 
     return (
-        <div className="p-8 max-w-7xl mx-auto space-y-6">
+        <div className="page">
             {/* Header */}
             <div>
-                <h1 className="text-3xl font-bold tracking-tight text-foreground">Case Queue</h1>
-                <p className="text-muted-foreground mt-2">
+                <h1 className="page-title">Case Queue</h1>
+                <p className="page-desc">
                     Review and process fraud cases by risk level priority.
                 </p>
             </div>
@@ -215,9 +215,9 @@ export default function FraudQueue() {
             </p>
 
             {/* Cases Table */}
-            <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
+            <div className="panel overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="dt dt-hover">
                         <thead className="bg-muted/50">
                             <tr>
                                 <th className="h-12 px-4 text-left font-medium text-muted-foreground">
@@ -267,7 +267,7 @@ export default function FraudQueue() {
                                         key={caseItem.id}
                                         className={cn(
                                             "border-b last:border-0 hover:bg-muted/30 transition-colors",
-                                            caseItem.queue === "critical" && caseItem.status !== "resolved" && "bg-red-50/50"
+                                            caseItem.queue === "critical" && caseItem.status !== "resolved" && "bg-down/5"
                                         )}
                                     >
                                         <td className="px-4 py-3">
@@ -287,17 +287,17 @@ export default function FraudQueue() {
                                         <td className="px-4 py-3 text-center">
                                             <span className={cn(
                                                 "inline-block px-3 py-1 rounded-full font-bold text-sm",
-                                                caseItem.fraud_score.score >= 800 ? "bg-red-100 text-red-800" :
-                                                    caseItem.fraud_score.score >= 600 ? "bg-orange-100 text-orange-800" :
-                                                        caseItem.fraud_score.score >= 400 ? "bg-yellow-100 text-yellow-800" :
-                                                            "bg-green-100 text-green-800"
+                                                caseItem.fraud_score.score >= 800 ? "badge badge-red" :
+                                                    caseItem.fraud_score.score >= 600 ? "badge badge-amber" :
+                                                        caseItem.fraud_score.score >= 400 ? "badge badge-amber" :
+                                                            "badge badge-green"
                                             )}>
                                                 {caseItem.fraud_score.score}
                                             </span>
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                             <span className={cn(
-                                                "inline-block px-2 py-1 rounded text-xs font-bold uppercase",
+                                                "badge uppercase",
                                                 queueStyle.bg, queueStyle.text
                                             )}>
                                                 {caseItem.queue}
@@ -305,8 +305,8 @@ export default function FraudQueue() {
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                             <span className={cn(
-                                                "inline-block px-2 py-1 rounded text-xs font-medium capitalize",
-                                                statusStyle.bg, statusStyle.text
+                                                "badge capitalize",
+                                                statusStyle.bg
                                             )}>
                                                 {caseItem.status.replace("_", " ")}
                                             </span>
@@ -315,9 +315,9 @@ export default function FraudQueue() {
                                             {caseItem.status !== "resolved" ? (
                                                 <div className={cn(
                                                     "flex items-center justify-center gap-1 text-xs font-medium",
-                                                    slaStatus.urgency === "critical" ? "text-red-600" :
-                                                        slaStatus.urgency === "warning" ? "text-yellow-600" :
-                                                            "text-green-600"
+                                                    slaStatus.urgency === "critical" ? "text-down" :
+                                                        slaStatus.urgency === "warning" ? "text-warn" :
+                                                            "text-up"
                                                 )}>
                                                     {slaStatus.urgency === "critical" && (
                                                         <AlertTriangle className="h-3 w-3" />

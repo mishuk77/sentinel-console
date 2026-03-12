@@ -3,66 +3,97 @@
 @tailwind utilities;
 
 @layer base {
+  /* ─────────────────────────────────────────────────────────────────────────
+     LIGHT THEME  (clean, cool-white)
+  ───────────────────────────────────────────────────────────────────────── */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background:        210 25% 97%;
+    --foreground:        224 64% 9%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card:              0 0% 100%;
+    --card-foreground:   224 64% 9%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover:           0 0% 100%;
+    --popover-foreground:224 64% 9%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary:           211 91% 46%;
+    --primary-foreground:0 0% 100%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary:         210 25% 92%;
+    --secondary-foreground:224 64% 9%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted:             210 25% 92%;
+    --muted-foreground:  215 18% 46%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent:            210 25% 91%;
+    --accent-foreground: 224 64% 9%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive:       0 72% 52%;
+    --destructive-foreground:0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border:            214 22% 86%;
+    --input:             214 22% 86%;
+    --ring:              211 91% 46%;
 
-    --radius: 0.5rem;
+    --radius:            0.25rem;
+
+    --up:    142 72% 38%;
+    --down:  0 72% 52%;
+    --warn:  38 95% 50%;
+    --info:  211 91% 46%;
+
+    /* Chart palette */
+    --chart-1: 211 91% 46%;
+    --chart-2: 142 72% 38%;
+    --chart-3: 0 72% 52%;
+    --chart-4: 270 60% 55%;
+    --chart-5: 38 95% 50%;
   }
 
+  /* ─────────────────────────────────────────────────────────────────────────
+     DARK THEME  (default — deep navy command-centre)
+  ───────────────────────────────────────────────────────────────────────── */
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    --background:        224 50% 4%;
+    --foreground:        210 35% 91%;
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    --card:              224 44% 6%;
+    --card-foreground:   210 35% 91%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover:           224 44% 7%;
+    --popover-foreground:210 35% 91%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary:           210 100% 58%;
+    --primary-foreground:224 50% 4%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary:         224 36% 10%;
+    --secondary-foreground:210 35% 80%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted:             224 36% 10%;
+    --muted-foreground:  215 18% 48%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent:            224 36% 11%;
+    --accent-foreground: 210 35% 91%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive:       0 68% 52%;
+    --destructive-foreground:0 0% 100%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border:            224 28% 13%;
+    --input:             224 28% 13%;
+    --ring:              210 100% 58%;
+
+    --radius:            0.25rem;
+
+    --up:    142 68% 40%;
+    --down:  0 68% 52%;
+    --warn:  38 95% 52%;
+    --info:  210 100% 58%;
+
+    --chart-1: 210 100% 58%;
+    --chart-2: 142 68% 40%;
+    --chart-3: 0 68% 52%;
+    --chart-4: 270 60% 65%;
+    --chart-5: 38 95% 52%;
   }
 }
 
@@ -71,7 +102,115 @@
     @apply border-border;
   }
 
+  html {
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system,
+                 BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'cv01','cv02','cv03','cv04','ss01';
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-size: 13.5px;
+    line-height: 1.6;
   }
+}
+
+@layer components {
+  /* ── Page shell ────────────────────────────────────────────────────────── */
+  .page { @apply p-6 max-w-screen-xl mx-auto space-y-5; }
+
+  /* ── Page header ───────────────────────────────────────────────────────── */
+  .page-title { @apply text-xl font-bold tracking-tight leading-tight; }
+  .page-desc  { @apply text-sm text-muted-foreground mt-0.5; }
+
+  /* ── KPI / Stat card ───────────────────────────────────────────────────── */
+  .kpi        { @apply bg-card border rounded p-4 flex flex-col; }
+  .kpi-label  { @apply text-2xs font-semibold uppercase tracking-wider text-muted-foreground mb-1; }
+  .kpi-value  { @apply text-2xl font-bold leading-none num; }
+  .kpi-sub    { @apply text-xs text-muted-foreground mt-1.5; }
+
+  /* ── Panel card ────────────────────────────────────────────────────────── */
+  .panel      { @apply bg-card border rounded overflow-hidden; }
+  .panel-head { @apply px-5 py-3 border-b flex items-center justify-between; }
+  .panel-title{ @apply text-sm font-semibold; }
+  .panel-body { @apply p-5; }
+
+  /* ── Data table ────────────────────────────────────────────────────────── */
+  .dt            { @apply w-full text-sm; }
+  .dt thead      { @apply border-b bg-muted/30; }
+  .dt th         { @apply px-4 py-2.5 text-left text-2xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap; }
+  .dt td         { @apply px-4 py-2.5; }
+  .dt tbody tr   { @apply border-b border-border/50 transition-colors; }
+  .dt tbody tr:last-child { @apply border-0; }
+  .dt-hover tbody tr:hover { @apply bg-muted/25 cursor-pointer; }
+
+  /* ── Status badges ─────────────────────────────────────────────────────── */
+  .badge        { @apply inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-semibold; }
+  .badge-green  { @apply badge bg-up/10 text-up; }
+  .badge-red    { @apply badge bg-down/10 text-down; }
+  .badge-amber  { @apply badge bg-warn/10 text-warn; }
+  .badge-blue   { @apply badge bg-info/10 text-info; }
+  .badge-muted  { @apply badge bg-muted text-muted-foreground; }
+
+  /* ── Form inputs ───────────────────────────────────────────────────────── */
+  .field-input {
+    @apply flex h-9 w-full rounded border border-input bg-background px-3 py-1.5 text-sm
+           placeholder:text-muted-foreground
+           focus:outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .field-label { @apply block text-xs font-medium text-foreground mb-1; }
+
+  /* ── Buttons ───────────────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded text-sm font-medium
+           transition-colors focus:outline-none focus:ring-2 focus:ring-ring/30
+           disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary { @apply btn bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4; }
+  .btn-ghost   { @apply btn text-muted-foreground hover:text-foreground hover:bg-accent h-9 px-3; }
+  .btn-outline { @apply btn border border-border hover:bg-accent h-9 px-3; }
+  .btn-danger  { @apply btn border border-down/30 text-down hover:bg-down/10 h-9 px-3; }
+  .btn-sm      { @apply h-7 px-2.5 text-xs; }
+  .btn-xs      { @apply h-6 px-2 text-2xs; }
+
+  /* ── Icon container ────────────────────────────────────────────────────── */
+  .icon-box    { @apply p-2 rounded flex items-center justify-center shrink-0; }
+  .icon-box-sm { @apply p-1.5 rounded flex items-center justify-center shrink-0; }
+
+  /* ── Status indicator bar ──────────────────────────────────────────────── */
+  .status-bar { @apply bg-card border rounded p-4 flex items-center gap-4 flex-wrap; }
+}
+
+@layer utilities {
+  /* Tabular numbers — critical for financial data */
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+    letter-spacing: 0.01em;
+  }
+
+  /* Subtle top-border highlight used on cards */
+  .card-highlight {
+    border-top: 2px solid hsl(var(--primary) / 0.4);
+  }
+
+  /* Status dot */
+  .dot-up   { @apply h-1.5 w-1.5 rounded-full bg-up; }
+  .dot-down { @apply h-1.5 w-1.5 rounded-full bg-down; }
+  .dot-warn { @apply h-1.5 w-1.5 rounded-full bg-warn; }
+  .dot-idle { @apply h-1.5 w-1.5 rounded-full bg-muted-foreground; }
+
+  /* Live pulse dot */
+  .dot-live { @apply h-1.5 w-1.5 rounded-full bg-up animate-pulse; }
+
+  /* Thin scrollbar for dense tables */
+  .thin-scroll::-webkit-scrollbar       { width: 4px; height: 4px; }
+  .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+  .thin-scroll::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+
+  /* Skeleton shimmer */
+  .skeleton { @apply bg-muted/50 rounded animate-pulse; }
 }

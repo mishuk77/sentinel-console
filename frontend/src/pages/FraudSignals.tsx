@@ -10,9 +10,6 @@ import {
     AlertTriangle,
     Clock,
     XCircle,
-    Activity,
-    DollarSign,
-    Zap,
     Shield,
     Smartphone,
     MousePointer,
@@ -25,18 +22,18 @@ import {
 import { cn } from "@/lib/utils";
 
 const PROVIDER_TYPE_CONFIG: Record<SignalProvider["provider_type"], { icon: typeof Shield; color: string; label: string }> = {
-    identity: { icon: Shield, color: "bg-blue-100 text-blue-700", label: "Identity Verification" },
-    device: { icon: Smartphone, color: "bg-purple-100 text-purple-700", label: "Device Intelligence" },
-    behavior: { icon: MousePointer, color: "bg-orange-100 text-orange-700", label: "Behavioral Biometrics" },
-    consortium: { icon: Building, color: "bg-green-100 text-green-700", label: "Consortium Data" },
-    bureau: { icon: CreditCard, color: "bg-indigo-100 text-indigo-700", label: "Credit Bureau" },
+    identity: { icon: Shield, color: "bg-info/10 text-info", label: "Identity Verification" },
+    device: { icon: Smartphone, color: "bg-info/10 text-info", label: "Device Intelligence" },
+    behavior: { icon: MousePointer, color: "bg-warn/10 text-warn", label: "Behavioral Biometrics" },
+    consortium: { icon: Building, color: "bg-up/10 text-up", label: "Consortium Data" },
+    bureau: { icon: CreditCard, color: "bg-info/10 text-info", label: "Credit Bureau" },
 };
 
 const STATUS_CONFIG: Record<SignalProvider["status"], { color: string; icon: typeof CheckCircle2 }> = {
-    connected: { color: "text-green-600", icon: CheckCircle2 },
-    disconnected: { color: "text-gray-400", icon: XCircle },
-    error: { color: "text-red-600", icon: AlertTriangle },
-    pending: { color: "text-yellow-600", icon: Clock },
+    connected: { color: "text-up", icon: CheckCircle2 },
+    disconnected: { color: "text-muted-foreground", icon: XCircle },
+    error: { color: "text-down", icon: AlertTriangle },
+    pending: { color: "text-warn", icon: Clock },
 };
 
 export default function FraudSignals() {
@@ -76,51 +73,39 @@ export default function FraudSignals() {
         : 0;
 
     return (
-        <div className="p-8 max-w-6xl mx-auto space-y-6">
+        <div className="page">
             {/* Header */}
             <div>
-                <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
-                    <Radio className="h-8 w-8 text-indigo-600" />
+                <h1 className="page-title flex items-center gap-3">
+                    <Radio className="h-6 w-6 text-info" />
                     Signal Providers
                 </h1>
-                <p className="text-muted-foreground mt-2">
+                <p className="page-desc">
                     Configure external signal providers for federated fraud intelligence.
                 </p>
             </div>
 
             {/* Summary Cards */}
             <div className="grid grid-cols-4 gap-4">
-                <div className="bg-card border rounded-xl p-4">
-                    <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-muted-foreground">Connected</p>
-                        <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    </div>
-                    <p className="text-3xl font-bold mt-2">{enabledProviders.length}</p>
-                    <p className="text-xs text-muted-foreground">of {providers.length} providers</p>
+                <div className="kpi">
+                    <p className="kpi-label">Connected</p>
+                    <p className="kpi-value">{enabledProviders.length}</p>
+                    <p className="kpi-sub">of {providers.length} providers</p>
                 </div>
-                <div className="bg-card border rounded-xl p-4">
-                    <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-muted-foreground">Total Signals</p>
-                        <Zap className="h-5 w-5 text-purple-500" />
-                    </div>
-                    <p className="text-3xl font-bold mt-2">{totalSignals}</p>
-                    <p className="text-xs text-muted-foreground">available signals</p>
+                <div className="kpi">
+                    <p className="kpi-label">Total Signals</p>
+                    <p className="kpi-value">{totalSignals}</p>
+                    <p className="kpi-sub">available signals</p>
                 </div>
-                <div className="bg-card border rounded-xl p-4">
-                    <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-muted-foreground">Calls Today</p>
-                        <Activity className="h-5 w-5 text-blue-500" />
-                    </div>
-                    <p className="text-3xl font-bold mt-2">{totalCallsToday.toLocaleString()}</p>
-                    <p className="text-xs text-muted-foreground">API calls</p>
+                <div className="kpi">
+                    <p className="kpi-label">Calls Today</p>
+                    <p className="kpi-value">{totalCallsToday.toLocaleString()}</p>
+                    <p className="kpi-sub">API calls</p>
                 </div>
-                <div className="bg-card border rounded-xl p-4">
-                    <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-muted-foreground">Avg Cost</p>
-                        <DollarSign className="h-5 w-5 text-green-500" />
-                    </div>
-                    <p className="text-3xl font-bold mt-2">${avgCost.toFixed(2)}</p>
-                    <p className="text-xs text-muted-foreground">per call</p>
+                <div className="kpi">
+                    <p className="kpi-label">Avg Cost</p>
+                    <p className="kpi-value">${avgCost.toFixed(2)}</p>
+                    <p className="kpi-sub">per call</p>
                 </div>
             </div>
 
@@ -156,7 +141,7 @@ export default function FraudSignals() {
                                                 <h3 className="font-semibold">{provider.name}</h3>
                                                 <StatusIcon className={cn("h-4 w-4", statusConfig.color)} />
                                                 {!provider.is_enabled && (
-                                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                                    <span className="badge badge-muted">
                                                         Disabled
                                                     </span>
                                                 )}
@@ -177,8 +162,8 @@ export default function FraudSignals() {
                                                 <div className="text-center">
                                                     <p className={cn(
                                                         "font-mono",
-                                                        provider.success_rate >= 99 ? "text-green-600" :
-                                                            provider.success_rate >= 95 ? "text-yellow-600" : "text-red-600"
+                                                        provider.success_rate >= 99 ? "text-up" :
+                                                            provider.success_rate >= 95 ? "text-warn" : "text-down"
                                                     )}>
                                                         {provider.success_rate}%
                                                     </p>
@@ -199,8 +184,8 @@ export default function FraudSignals() {
                                             className={cn(
                                                 "p-2 rounded-lg transition-colors",
                                                 provider.is_enabled
-                                                    ? "bg-green-100 text-green-700 hover:bg-green-200"
-                                                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                                    ? "bg-up/10 text-up hover:bg-up/20"
+                                                    : "bg-muted text-muted-foreground hover:bg-muted/70"
                                             )}
                                         >
                                             {provider.is_enabled ? (
@@ -293,12 +278,12 @@ export default function FraudSignals() {
             </div>
 
             {/* Info Banner */}
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className="panel border-info/30 p-4">
                 <div className="flex items-start gap-3">
-                    <AlertTriangle className="h-5 w-5 text-blue-600 mt-0.5" />
+                    <AlertTriangle className="h-5 w-5 text-info mt-0.5" />
                     <div>
-                        <p className="text-sm text-blue-900 font-medium">Federated Signal Processing</p>
-                        <p className="text-sm text-blue-700 mt-1">
+                        <p className="text-sm text-foreground font-medium">Federated Signal Processing</p>
+                        <p className="text-sm text-muted-foreground mt-1">
                             Signals from enabled providers are automatically integrated into your fraud scoring pipeline.
                             Each API call is logged and billed according to your provider agreements.
                             Configure signal weights in the Rules section.

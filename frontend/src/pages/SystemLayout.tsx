@@ -1,16 +1,17 @@
 import { Outlet, NavLink, useParams, Link, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { api, type DecisionSystem } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, type DecisionSystem, type SystemType } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
-import { LayoutDashboard, ArrowLeft, Globe, LogOut, Settings } from "lucide-react";
+import { LayoutDashboard, ArrowLeft, Globe, LogOut, Activity, ArrowUpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { buildNavItems, type SystemModule } from "@/lib/modules";
+import { buildNavItems } from "@/lib/modules";
 
 export default function SystemLayout() {
     const { systemId } = useParams<{ systemId: string }>();
     const { logout } = useAuth();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
 
     const { data: system, isLoading } = useQuery<DecisionSystem>({
         queryKey: ["system", systemId],
@@ -21,22 +22,34 @@ export default function SystemLayout() {
         enabled: !!systemId
     });
 
+    const upgradeMutation = useMutation({
+        mutationFn: async () => {
+            await api.post(`/systems/${systemId}/upgrade`);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["system", systemId] });
+            queryClient.invalidateQueries({ queryKey: ["systems"] });
+        },
+    });
+
     const handleLogout = () => {
         logout();
         navigate("/login");
     };
 
     if (isLoading) return <div className="p-12 text-center text-muted-foreground">Loading system context...</div>;
-    if (!system) return <div className="p-12 text-center text-red-500">System not found</div>;
+    if (!system) return <div className="p-12 text-center text-down">System not found</div>;
 
-    // Build navigation dynamically from enabled modules
-    const moduleNavItems = buildNavItems(systemId!, system.enabled_modules as SystemModule[] | undefined);
+    const sysType: SystemType = system.system_type || "full";
+
+    // Build navigation dynamically from system_type
+    const moduleNavItems = buildNavItems(systemId!, undefined, sysType);
 
     const navItems = [
         { to: `/systems/${systemId}/overview`, icon: LayoutDashboard, label: "Overview" },
         ...moduleNavItems,
+        { to: `/systems/${systemId}/monitoring`, icon: Activity, label: "Monitoring" },
         { to: `/systems/${systemId}/deployments`, icon: Globe, label: "Integration" },
-        { to: `/systems/${systemId}/modules`, icon: Settings, label: "Modules" },
     ];
 
     return (
@@ -55,12 +68,21 @@ export default function SystemLayout() {
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
-                    <div className="text-xs text-muted-foreground">
-                        Decision System Workspace
+                    <div className="flex items-center gap-2">
+                        <span className={cn(
+                            "badge",
+                            sysType === "credit" ? "badge-blue" :
+                            sysType === "fraud" ? "badge-amber" :
+                            "badge-green"
+                        )}>
+                            {sysType === "credit" ? "Credit Risk" :
+                             sysType === "fraud" ? "Fraud Detection" :
+                             "Full Pipeline"}
+                        </span>
                     </div>
                     <button
                         onClick={handleLogout}
-                        className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground hover:text-red-500"
+                        className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground hover:text-down"
                         title="Sign out"
                     >
                         <LogOut className="h-4 w-4" />
@@ -86,6 +108,24 @@ export default function SystemLayout() {
                             {item.label}
                         </NavLink>
                     ))}
+
+                    {/* Upgrade to Full Pipeline */}
+                    {sysType !== "full" && (
+                        <div className="pt-4 mt-4 border-t">
+                            <button
+                                onClick={() => {
+                                    if (window.confirm("Upgrade this system to Full Pipeline? This adds all modules and cannot be undone.")) {
+                                        upgradeMutation.mutate();
+                                    }
+                                }}
+                                disabled={upgradeMutation.isPending}
+                                className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+                            >
+                                <ArrowUpCircle className="h-4 w-4" />
+                                Upgrade to Full Pipeline
+                            </button>
+                        </div>
+                    )}
                 </aside>
 
                 {/* Main Content Area */}

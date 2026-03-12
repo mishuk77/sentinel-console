@@ -30,10 +30,10 @@ import {
 import { cn } from "@/lib/utils";
 
 const ACTION_CONFIG = {
-    flag: { label: "Flag for Review", color: "bg-yellow-100 text-yellow-800", icon: AlertTriangle },
-    auto_decline: { label: "Auto Decline", color: "bg-red-100 text-red-800", icon: X },
-    escalate: { label: "Escalate", color: "bg-purple-100 text-purple-800", icon: TrendingUp },
-    require_verification: { label: "Require Verification", color: "bg-blue-100 text-blue-800", icon: Shield },
+    flag: { label: "Flag for Review", color: "badge badge-amber", icon: AlertTriangle },
+    auto_decline: { label: "Auto Decline", color: "badge badge-red", icon: X },
+    escalate: { label: "Escalate", color: "badge badge-blue", icon: TrendingUp },
+    require_verification: { label: "Require Verification", color: "badge badge-blue", icon: Shield },
 };
 
 const OPERATOR_LABELS: Record<string, string> = {
@@ -209,7 +209,7 @@ function RuleEditor({ rule, onSave, onCancel }: RuleEditorProps) {
                                 <button
                                     onClick={() => removeCondition(index)}
                                     disabled={conditions.length === 1}
-                                    className="p-1 text-muted-foreground hover:text-red-600 disabled:opacity-30"
+                                    className="p-1 text-muted-foreground hover:text-down disabled:opacity-30"
                                 >
                                     <Trash2 className="h-4 w-4" />
                                 </button>
@@ -272,7 +272,7 @@ function RuleEditor({ rule, onSave, onCancel }: RuleEditorProps) {
                         onClick={() => setIsActive(!isActive)}
                         className={cn(
                             "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                            isActive ? "bg-green-500" : "bg-gray-300"
+                            isActive ? "bg-up" : "bg-muted"
                         )}
                     >
                         <span
@@ -319,7 +319,7 @@ function SimulationResult({ simulation, rule, onClose }: SimulationResultProps) 
         <div className="bg-card border rounded-xl p-6 shadow-lg">
             <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-lg flex items-center gap-2">
-                    <Target className="h-5 w-5 text-purple-600" />
+                    <Target className="h-5 w-5 text-info" />
                     Simulation Results
                 </h3>
                 <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
@@ -336,17 +336,17 @@ function SimulationResult({ simulation, rule, onClose }: SimulationResultProps) 
                     <p className="text-2xl font-bold">{simulation.total_applications}</p>
                     <p className="text-xs text-muted-foreground">Total Applications</p>
                 </div>
-                <div className="bg-orange-50 rounded-lg p-4 text-center border border-orange-200">
-                    <p className="text-2xl font-bold text-orange-700">{simulation.would_trigger}</p>
-                    <p className="text-xs text-orange-600">Would Trigger</p>
+                <div className="kpi border-warn/30 bg-warn/5">
+                    <p className="kpi-value text-warn">{simulation.would_trigger}</p>
+                    <p className="kpi-label">Would Trigger</p>
                 </div>
-                <div className="bg-blue-50 rounded-lg p-4 text-center border border-blue-200">
-                    <p className="text-2xl font-bold text-blue-700">{simulation.trigger_rate}%</p>
-                    <p className="text-xs text-blue-600">Trigger Rate</p>
+                <div className="kpi border-info/30 bg-info/5">
+                    <p className="kpi-value text-info">{simulation.trigger_rate}%</p>
+                    <p className="kpi-label">Trigger Rate</p>
                 </div>
-                <div className="bg-yellow-50 rounded-lg p-4 text-center border border-yellow-200">
-                    <p className="text-2xl font-bold text-yellow-700">~{simulation.false_positive_estimate}</p>
-                    <p className="text-xs text-yellow-600">Est. False Positives</p>
+                <div className="kpi border-warn/30 bg-warn/5">
+                    <p className="kpi-value text-warn">~{simulation.false_positive_estimate}</p>
+                    <p className="kpi-label">Est. False Positives</p>
                 </div>
             </div>
 
@@ -371,7 +371,7 @@ function SimulationResult({ simulation, rule, onClose }: SimulationResultProps) 
                                 </td>
                                 <td className="px-4 py-2">{match.applicant_name}</td>
                                 <td className="px-4 py-2 text-right font-mono">{match.current_score}</td>
-                                <td className="px-4 py-2 text-right font-mono text-orange-600">
+                                <td className="px-4 py-2 text-right font-mono text-warn">
                                     {match.would_be_score} (+{rule.score_impact})
                                 </td>
                             </tr>
@@ -447,15 +447,12 @@ export default function FraudRules() {
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
                                 <h4 className="font-medium truncate">{rule.name}</h4>
-                                <span className={cn(
-                                    "px-2 py-0.5 rounded text-xs font-medium",
-                                    actionConfig.color
-                                )}>
+                                <span className={actionConfig.color}>
                                     <ActionIcon className="h-3 w-3 inline mr-1" />
                                     {actionConfig.label}
                                 </span>
                                 {!rule.is_active && (
-                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600">
+                                    <span className="badge badge-muted">
                                         Inactive
                                     </span>
                                 )}
@@ -555,8 +552,8 @@ export default function FraudRules() {
                                     className={cn(
                                         "inline-flex items-center gap-1 px-3 py-1.5 text-sm border rounded-lg transition-colors",
                                         rule.is_active
-                                            ? "text-orange-600 border-orange-300 hover:bg-orange-50"
-                                            : "text-green-600 border-green-300 hover:bg-green-50"
+                                            ? "text-warn border-warn/30 hover:bg-warn/5"
+                                            : "text-up border-up/30 hover:bg-up/5"
                                     )}
                                 >
                                     {rule.is_active ? (
@@ -568,13 +565,13 @@ export default function FraudRules() {
                             </div>
                             {deleteConfirm === rule.id ? (
                                 <div className="flex items-center gap-2">
-                                    <span className="text-sm text-red-600">Delete this rule?</span>
+                                    <span className="text-sm text-down">Delete this rule?</span>
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             handleDelete(rule.id);
                                         }}
-                                        className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+                                        className="btn-danger btn-sm"
                                     >
                                         Confirm
                                     </button>
@@ -594,7 +591,7 @@ export default function FraudRules() {
                                         e.stopPropagation();
                                         setDeleteConfirm(rule.id);
                                     }}
-                                    className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors"
+                                    className="btn-danger btn-sm inline-flex items-center gap-1"
                                 >
                                     <Trash2 className="h-3 w-3" /> Delete
                                 </button>
@@ -607,15 +604,15 @@ export default function FraudRules() {
     };
 
     return (
-        <div className="p-8 max-w-5xl mx-auto space-y-6">
+        <div className="page">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
-                        <Zap className="h-8 w-8 text-purple-600" />
+                    <h1 className="page-title flex items-center gap-3">
+                        <Zap className="h-6 w-6 text-info" />
                         Fraud Rules
                     </h1>
-                    <p className="text-muted-foreground mt-2">
+                    <p className="page-desc">
                         Configure automated fraud detection rules and thresholds.
                     </p>
                 </div>
@@ -624,7 +621,7 @@ export default function FraudRules() {
                         setEditingRule(undefined);
                         setShowEditor(true);
                     }}
-                    className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+                    className="btn-primary btn-sm inline-flex items-center gap-2"
                 >
                     <Plus className="h-4 w-4" /> Create Rule
                 </button>
@@ -632,26 +629,17 @@ export default function FraudRules() {
 
             {/* Summary */}
             <div className="grid grid-cols-3 gap-4">
-                <div className="bg-card border rounded-xl p-4">
-                    <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-muted-foreground">Active Rules</p>
-                        <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    </div>
-                    <p className="text-3xl font-bold mt-2">{activeRules.length}</p>
+                <div className="kpi">
+                    <p className="kpi-label">Active Rules</p>
+                    <p className="kpi-value">{activeRules.length}</p>
                 </div>
-                <div className="bg-card border rounded-xl p-4">
-                    <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-muted-foreground">Inactive Rules</p>
-                        <PowerOff className="h-5 w-5 text-gray-400" />
-                    </div>
-                    <p className="text-3xl font-bold mt-2">{inactiveRules.length}</p>
+                <div className="kpi">
+                    <p className="kpi-label">Inactive Rules</p>
+                    <p className="kpi-value">{inactiveRules.length}</p>
                 </div>
-                <div className="bg-card border rounded-xl p-4">
-                    <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-muted-foreground">Total Triggers (30d)</p>
-                        <Target className="h-5 w-5 text-orange-500" />
-                    </div>
-                    <p className="text-3xl font-bold mt-2">
+                <div className="kpi">
+                    <p className="kpi-label">Total Triggers (30d)</p>
+                    <p className="kpi-value">
                         {rules.reduce((sum, r) => sum + r.trigger_count_30d, 0)}
                     </p>
                 </div>
@@ -689,7 +677,7 @@ export default function FraudRules() {
             {/* Active Rules */}
             <div>
                 <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    <CheckCircle2 className="h-5 w-5 text-up" />
                     Active Rules
                 </h2>
                 <div className="space-y-3">

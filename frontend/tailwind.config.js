@@ -48,11 +48,19 @@ export default {
                     DEFAULT: "hsl(var(--card))",
                     foreground: "hsl(var(--card-foreground))",
                 },
+                // Semantic status colors (used across all pages)
+                up:   "hsl(var(--up))",
+                down: "hsl(var(--down))",
+                warn: "hsl(var(--warn))",
+                info: "hsl(var(--info))",
             },
             borderRadius: {
                 lg: "var(--radius)",
-                md: "calc(var(--radius) - 2px)",
-                sm: "calc(var(--radius) - 4px)",
+                md: "var(--radius)",
+                sm: "calc(var(--radius) - 1px)",
+            },
+            fontSize: {
+                "2xs": ["0.6875rem", { lineHeight: "1rem" }],
             },
             keyframes: {
                 "accordion-down": {

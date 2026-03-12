@@ -2,306 +2,242 @@ import { useOutletContext, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type DecisionSystem } from "@/lib/api";
 import {
-    BarChart3,
-    Database,
-    ShieldAlert,
-    DollarSign,
-    BrainCircuit,
-    Sliders,
-    ArrowRight,
+    BarChart3, Database, ShieldAlert, DollarSign,
+    BrainCircuit, Sliders, ArrowRight,
 } from "lucide-react";
 import {
-    AreaChart,
-    Area,
-    XAxis,
-    CartesianGrid,
-    Tooltip,
-    ResponsiveContainer,
+    AreaChart, Area, XAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { cn } from "@/lib/utils";
-import {
-    MODULE_REGISTRY,
-    MODULE_ORDER,
-    isModuleEnabled,
-    type SystemModule,
-} from "@/lib/modules";
+import { MODULE_REGISTRY, MODULE_ORDER, getModulesForSystemType } from "@/lib/modules";
+
+const CHART_PRIMARY = "hsl(210,100%,58%)";
 
 export default function SystemOverview() {
     const { system } = useOutletContext<{ system: DecisionSystem }>();
-    const enabledModules = (system.enabled_modules as SystemModule[]) || MODULE_ORDER;
+    const enabledModules = getModulesForSystemType(system.system_type || "full");
 
-    // Fetch Stats
     const { data: stats } = useQuery({
         queryKey: ["stats", system.id],
         queryFn: async () => {
-            const res = await api.get("/decisions/stats/overview", {
-                params: { system_id: system.id },
-            });
-            return res.data;
+            const r = await api.get("/decisions/stats/overview", { params: { system_id: system.id } });
+            return r.data;
         },
         refetchInterval: 5000,
     });
 
     const hasHistory = stats?.history && stats.history.length > 0;
-
-    // Module status checks
-    const hasCreditScoring = isModuleEnabled(enabledModules, "credit_scoring");
-    const hasPolicyEngine = isModuleEnabled(enabledModules, "policy_engine");
-    const hasFraudDetection = isModuleEnabled(enabledModules, "fraud_detection");
-    const hasExposureControl = isModuleEnabled(enabledModules, "exposure_control");
+    const hasCreditScoring   = enabledModules.includes("credit_scoring");
+    const hasPolicyEngine    = enabledModules.includes("policy_engine");
+    const hasFraudDetection  = enabledModules.includes("fraud_detection");
+    const hasExposureControl = enabledModules.includes("exposure_control");
 
     return (
-        <div className="p-8 space-y-8 animate-in fade-in zoom-in-95">
+        <div className="page">
+            {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-2xl font-bold mb-1">System Overview</h2>
-                    <p className="text-muted-foreground">
-                        {system.description || "No description provided."}
-                    </p>
+                    <h2 className="page-title">System Overview</h2>
+                    <p className="page-desc">{system.description || "No description provided."}</p>
                 </div>
-                {/* Stats Summary */}
-                <div className="flex gap-4">
-                    <div className="bg-card border px-4 py-2 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground font-medium uppercase">
-                            24h Volume
-                        </div>
-                        <div className="text-xl font-bold">
-                            {stats?.total_volume_24h || 0}
-                        </div>
+                <div className="flex gap-3">
+                    <div className="kpi min-w-[100px]">
+                        <p className="kpi-label">24h Volume</p>
+                        <p className="kpi-value">{(stats?.total_volume_24h ?? 0).toLocaleString()}</p>
                     </div>
-                    <div className="bg-card border px-4 py-2 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground font-medium uppercase">
-                            Approval Rate
-                        </div>
-                        <div className="text-xl font-bold">
-                            {((stats?.approval_rate_24h || 0) * 100).toFixed(1)}%
-                        </div>
+                    <div className="kpi min-w-[100px]">
+                        <p className="kpi-label">Approval Rate</p>
+                        <p className="kpi-value text-up">
+                            {((stats?.approval_rate_24h ?? 0) * 100).toFixed(1)}%
+                        </p>
                     </div>
                 </div>
             </div>
 
-            {/* Module Cards Grid - Adaptive based on enabled modules */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {/* Credit Scoring Card */}
+            {/* Module cards + chart grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Credit Scoring */}
                 {hasCreditScoring && (
                     <Link
                         to={`/systems/${system.id}/models`}
-                        className="group bg-card border rounded-xl p-6 shadow-sm hover:shadow-md hover:border-blue-300 transition-all"
+                        className="group panel p-5 hover:border-primary/40 transition-colors"
                     >
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                                <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-                                    <BrainCircuit className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                                <div className="icon-box-sm bg-info/10">
+                                    <BrainCircuit className="h-3.5 w-3.5 text-info" />
                                 </div>
-                                <span className="font-semibold text-sm uppercase tracking-wider">
+                                <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     Active Model
                                 </span>
                             </div>
-                            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-blue-600 transition-colors" />
+                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                         </div>
                         {system.active_model_summary ? (
                             <div>
-                                <div className="text-xl font-bold text-foreground mb-1">
+                                <p className="text-sm font-bold text-foreground mb-0.5 truncate">
                                     {system.active_model_summary.name}
-                                </div>
-                                <div className="text-xs text-muted-foreground font-mono truncate">
+                                </p>
+                                <p className="text-2xs text-muted-foreground font-mono truncate mb-2">
                                     {system.active_model_summary.id}
-                                </div>
-                                <div className="mt-2 text-green-600 font-bold text-sm">
-                                    AUC: {(system.active_model_summary.auc * 100).toFixed(1)}%
-                                </div>
+                                </p>
+                                <span className="badge badge-green">
+                                    AUC {(system.active_model_summary.auc * 100).toFixed(1)}%
+                                </span>
                             </div>
                         ) : (
-                            <div className="text-muted-foreground text-sm">
-                                No active model. Train your first model to get started.
-                            </div>
+                            <p className="text-xs text-muted-foreground">No active model — train your first model.</p>
                         )}
                     </Link>
                 )}
 
-                {/* Policy Engine Card */}
+                {/* Policy Engine */}
                 {hasPolicyEngine && (
                     <Link
                         to={`/systems/${system.id}/policy`}
-                        className="group bg-card border rounded-xl p-6 shadow-sm hover:shadow-md hover:border-purple-300 transition-all"
+                        className="group panel p-5 hover:border-primary/40 transition-colors"
                     >
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                                <div className="p-2 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
-                                    <Sliders className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                                <div className="icon-box-sm bg-primary/10">
+                                    <Sliders className="h-3.5 w-3.5 text-primary" />
                                 </div>
-                                <span className="font-semibold text-sm uppercase tracking-wider">
+                                <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     Active Policy
                                 </span>
                             </div>
-                            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-purple-600 transition-colors" />
+                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                         </div>
                         {system.active_policy_summary ? (
                             <div>
-                                <div className="text-2xl font-bold text-foreground mb-1">
-                                    <span className="text-sm text-muted-foreground mr-1">
-                                        Threshold:
-                                    </span>
-                                    {system.active_policy_summary.threshold}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                    Est. Approval:{" "}
-                                    {(system.active_policy_summary.approval_rate * 100).toFixed(1)}%
-                                </div>
+                                <p className="text-sm font-bold text-foreground mb-0.5">
+                                    Threshold: <span className="font-mono">{system.active_policy_summary.threshold}</span>
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Est. approval: {(system.active_policy_summary.approval_rate * 100).toFixed(1)}%
+                                </p>
                             </div>
                         ) : (
-                            <div className="text-muted-foreground text-sm">
-                                No active policy. Configure a threshold to start decisioning.
-                            </div>
+                            <p className="text-xs text-muted-foreground">No active policy — configure a threshold.</p>
                         )}
                     </Link>
                 )}
 
-                {/* Fraud Detection Card */}
+                {/* Fraud Detection */}
                 {hasFraudDetection && (
                     <Link
-                        to={`/systems/${system.id}/fraud`}
-                        className="group bg-card border rounded-xl p-6 shadow-sm hover:shadow-md hover:border-orange-300 transition-all"
+                        to={`/systems/${system.id}/fraud/detection`}
+                        className="group panel p-5 hover:border-primary/40 transition-colors"
                     >
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                                <div className="p-2 bg-orange-50 dark:bg-orange-900/30 rounded-lg">
-                                    <ShieldAlert className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                                <div className="icon-box-sm bg-warn/10">
+                                    <ShieldAlert className="h-3.5 w-3.5 text-warn" />
                                 </div>
-                                <span className="font-semibold text-sm uppercase tracking-wider">
+                                <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     Fraud Detection
                                 </span>
                             </div>
-                            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-orange-600 transition-colors" />
+                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                         </div>
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <span className="text-sm text-muted-foreground">Open Cases</span>
-                                <span className="text-xl font-bold">
-                                    {stats?.fraud_open_cases || 0}
-                                </span>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-2xl font-bold num">{stats?.fraud_open_cases ?? 0}</p>
+                                <p className="text-xs text-muted-foreground">Open cases</p>
                             </div>
-                            <div className="flex items-center justify-between">
-                                <span className="text-sm text-muted-foreground">24h Flagged</span>
-                                <span className="text-lg font-semibold text-orange-600">
-                                    {stats?.fraud_flagged_24h || 0}
-                                </span>
+                            <div className="text-right">
+                                <p className="text-lg font-semibold text-warn num">{stats?.fraud_flagged_24h ?? 0}</p>
+                                <p className="text-xs text-muted-foreground">24h flagged</p>
                             </div>
                         </div>
                     </Link>
                 )}
 
-                {/* Exposure Control Card */}
+                {/* Exposure Control */}
                 {hasExposureControl && (
                     <Link
                         to={`/systems/${system.id}/exposure`}
-                        className="group bg-card border rounded-xl p-6 shadow-sm hover:shadow-md hover:border-green-300 transition-all"
+                        className="group panel p-5 hover:border-primary/40 transition-colors"
                     >
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                                <div className="p-2 bg-green-50 dark:bg-green-900/30 rounded-lg">
-                                    <DollarSign className="h-5 w-5 text-green-600 dark:text-green-400" />
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                                <div className="icon-box-sm bg-up/10">
+                                    <DollarSign className="h-3.5 w-3.5 text-up" />
                                 </div>
-                                <span className="font-semibold text-sm uppercase tracking-wider">
+                                <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
                                     Exposure Control
                                 </span>
                             </div>
-                            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-green-600 transition-colors" />
+                            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                         </div>
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <span className="text-sm text-muted-foreground">Utilization</span>
-                                <span className="text-xl font-bold">
-                                    {((stats?.exposure_utilization || 0) * 100).toFixed(1)}%
-                                </span>
-                            </div>
-                            <div className="w-full bg-muted rounded-full h-2">
-                                <div
-                                    className={cn(
-                                        "h-2 rounded-full transition-all",
-                                        (stats?.exposure_utilization || 0) > 0.8
-                                            ? "bg-red-500"
-                                            : (stats?.exposure_utilization || 0) > 0.6
-                                            ? "bg-yellow-500"
-                                            : "bg-green-500"
-                                    )}
-                                    style={{
-                                        width: `${Math.min((stats?.exposure_utilization || 0) * 100, 100)}%`,
-                                    }}
-                                />
-                            </div>
+                        <p className="text-2xl font-bold num">
+                            {((stats?.exposure_utilization ?? 0) * 100).toFixed(1)}%
+                        </p>
+                        <p className="text-xs text-muted-foreground mb-2">Utilization</p>
+                        <div className="w-full bg-muted rounded-full h-1.5">
+                            <div
+                                className={cn(
+                                    "h-1.5 rounded-full transition-all",
+                                    (stats?.exposure_utilization ?? 0) > 0.8 ? "bg-down"
+                                        : (stats?.exposure_utilization ?? 0) > 0.6 ? "bg-warn"
+                                        : "bg-up"
+                                )}
+                                style={{ width: `${Math.min((stats?.exposure_utilization ?? 0) * 100, 100)}%` }}
+                            />
                         </div>
                     </Link>
                 )}
 
-                {/* Volume Chart Card - Always visible */}
-                <div
-                    className={cn(
-                        "bg-card border rounded-xl p-6 shadow-sm flex flex-col",
-                        enabledModules.length <= 2 ? "md:col-span-2" : "lg:col-span-2"
-                    )}
-                >
-                    <div className="flex items-center gap-2 mb-4 text-muted-foreground">
-                        <BarChart3 className="h-5 w-5" />
-                        <span className="font-semibold text-sm uppercase tracking-wider">
+                {/* Volume chart card */}
+                <div className={cn(
+                    "panel p-5 flex flex-col",
+                    enabledModules.length <= 2 ? "md:col-span-2" : "lg:col-span-2"
+                )}>
+                    <div className="flex items-center gap-2 mb-4">
+                        <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
                             Volume Trend (7 Days)
                         </span>
                     </div>
-                    <div className="flex-1 w-full min-h-[120px]">
+                    <div className="flex-1 min-h-[120px]">
                         {hasHistory ? (
                             <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={stats.history}>
+                                <AreaChart data={stats.history} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                                     <defs>
-                                        <linearGradient
-                                            id="colorVolume"
-                                            x1="0"
-                                            y1="0"
-                                            x2="0"
-                                            y2="1"
-                                        >
-                                            <stop
-                                                offset="5%"
-                                                stopColor="#3b82f6"
-                                                stopOpacity={0.1}
-                                            />
-                                            <stop
-                                                offset="95%"
-                                                stopColor="#3b82f6"
-                                                stopOpacity={0}
-                                            />
+                                        <linearGradient id="gradVol" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%"  stopColor={CHART_PRIMARY} stopOpacity={0.15} />
+                                            <stop offset="95%" stopColor={CHART_PRIMARY} stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid
-                                        strokeDasharray="3 3"
-                                        vertical={false}
-                                        stroke="#E5E7EB"
-                                    />
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                                     <XAxis
                                         dataKey="date"
-                                        tick={{ fontSize: 10 }}
+                                        tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                                         tickLine={false}
                                         axisLine={false}
                                     />
                                     <Tooltip
                                         contentStyle={{
-                                            borderRadius: "8px",
-                                            border: "none",
-                                            boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                                            background: "hsl(var(--popover))",
+                                            border: "1px solid hsl(var(--border))",
+                                            borderRadius: "var(--radius)",
+                                            fontSize: "11px",
                                         }}
-                                        labelStyle={{ fontSize: "12px", color: "#6B7280" }}
+                                        labelStyle={{ color: "hsl(var(--muted-foreground))" }}
                                     />
                                     <Area
                                         type="monotone"
                                         dataKey="volume"
-                                        stroke="#3b82f6"
+                                        stroke={CHART_PRIMARY}
                                         strokeWidth={2}
                                         fillOpacity={1}
-                                        fill="url(#colorVolume)"
+                                        fill="url(#gradVol)"
+                                        dot={false}
                                     />
                                 </AreaChart>
                             </ResponsiveContainer>
                         ) : (
-                            <div className="h-full flex items-center justify-center text-sm text-muted-foreground bg-muted/20 rounded-lg">
+                            <div className="h-full flex items-center justify-center text-xs text-muted-foreground bg-muted/20 rounded">
                                 Not enough data to display trends.
                             </div>
                         )}
@@ -309,73 +245,52 @@ export default function SystemOverview() {
                 </div>
             </div>
 
-            {/* Active Modules Summary */}
-            <div className="border rounded-xl p-6 bg-muted/20">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold">Active Modules</h3>
-                    <Link
-                        to={`/systems/${system.id}/modules`}
-                        className="text-sm text-primary hover:underline"
-                    >
-                        Manage Modules
+            {/* Active modules */}
+            <div className="panel">
+                <div className="panel-head">
+                    <span className="panel-title">Active Modules</span>
+                    <Link to={`/systems/${system.id}/modules`} className="text-xs text-primary hover:underline">
+                        Manage →
                     </Link>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    {MODULE_ORDER.filter((m) => enabledModules.includes(m)).map(
-                        (moduleId) => {
+                <div className="panel-body">
+                    <div className="flex flex-wrap gap-2">
+                        {MODULE_ORDER.filter(m => enabledModules.includes(m)).map(moduleId => {
                             const mod = MODULE_REGISTRY[moduleId];
                             const Icon = mod.icon;
                             return (
-                                <div
-                                    key={moduleId}
-                                    className={cn(
-                                        "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium",
-                                        mod.badgeClasses
-                                    )}
-                                >
-                                    <Icon className="h-4 w-4" />
+                                <div key={moduleId} className={cn("badge", mod.badgeClasses)}>
+                                    <Icon className="h-3 w-3" />
                                     {mod.name}
                                 </div>
                             );
-                        }
-                    )}
+                        })}
+                    </div>
                 </div>
             </div>
 
-            {/* Quick Actions */}
-            <div className="border-t pt-8">
-                <h3 className="font-semibold mb-4">Quick Actions</h3>
-                <div className="flex flex-wrap gap-4">
+            {/* Quick actions */}
+            <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Quick Actions</p>
+                <div className="flex flex-wrap gap-2">
                     {hasCreditScoring && (
-                        <Link
-                            to={`/systems/${system.id}/data`}
-                            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-card border shadow-sm rounded-md hover:bg-gray-50 dark:hover:bg-muted text-sm font-medium transition-colors"
-                        >
-                            <Database className="h-4 w-4 text-blue-500" /> Upload Data
+                        <Link to={`/systems/${system.id}/data`} className="btn-outline btn-sm">
+                            <Database className="h-3 w-3 text-info" /> Upload Data
                         </Link>
                     )}
                     {hasCreditScoring && (
-                        <Link
-                            to={`/systems/${system.id}/training`}
-                            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-card border shadow-sm rounded-md hover:bg-gray-50 dark:hover:bg-muted text-sm font-medium transition-colors"
-                        >
-                            <BrainCircuit className="h-4 w-4 text-blue-500" /> Train Model
+                        <Link to={`/systems/${system.id}/training`} className="btn-outline btn-sm">
+                            <BrainCircuit className="h-3 w-3 text-info" /> Train Model
                         </Link>
                     )}
                     {hasPolicyEngine && (
-                        <Link
-                            to={`/systems/${system.id}/policy`}
-                            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-card border shadow-sm rounded-md hover:bg-gray-50 dark:hover:bg-muted text-sm font-medium transition-colors"
-                        >
-                            <Sliders className="h-4 w-4 text-purple-500" /> Configure Policy
+                        <Link to={`/systems/${system.id}/policy`} className="btn-outline btn-sm">
+                            <Sliders className="h-3 w-3 text-primary" /> Configure Policy
                         </Link>
                     )}
                     {hasFraudDetection && (
-                        <Link
-                            to={`/systems/${system.id}/fraud/queue`}
-                            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-card border shadow-sm rounded-md hover:bg-gray-50 dark:hover:bg-muted text-sm font-medium transition-colors"
-                        >
-                            <ShieldAlert className="h-4 w-4 text-orange-500" /> Review Cases
+                        <Link to={`/systems/${system.id}/fraud/queue`} className="btn-outline btn-sm">
+                            <ShieldAlert className="h-3 w-3 text-warn" /> Review Cases
                         </Link>
                     )}
                 </div>

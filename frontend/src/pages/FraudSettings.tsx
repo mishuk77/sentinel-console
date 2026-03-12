@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import {
     getAutomationSettings,
     updateAutomationSettings,
@@ -19,6 +19,9 @@ import {
     Webhook,
     AlertTriangle,
     Info,
+    Check,
+    ArrowRight,
+    ArrowLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,11 +36,11 @@ function Toggle({ enabled, onChange, label, description }: ToggleProps) {
     return (
         <div className="flex items-start justify-between gap-4">
             <div className="flex-1">
-                <label className="font-medium text-gray-900 dark:text-gray-100">
+                <label className="font-medium text-foreground">
                     {label}
                 </label>
                 {description && (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                    <p className="text-sm text-muted-foreground mt-0.5">
                         {description}
                     </p>
                 )}
@@ -46,7 +49,7 @@ function Toggle({ enabled, onChange, label, description }: ToggleProps) {
                 onClick={() => onChange(!enabled)}
                 className={cn(
                     "relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
-                    enabled ? "bg-blue-600" : "bg-gray-200 dark:bg-gray-700"
+                    enabled ? "bg-primary" : "bg-muted"
                 )}
             >
                 <span
@@ -83,11 +86,11 @@ function NumberInput({
 }: NumberInputProps) {
     return (
         <div className="space-y-1">
-            <label className="font-medium text-gray-900 dark:text-gray-100">
+            <label className="font-medium text-foreground">
                 {label}
             </label>
             {description && (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-muted-foreground">
                     {description}
                 </p>
             )}
@@ -99,10 +102,10 @@ function NumberInput({
                     min={min}
                     max={max}
                     step={step}
-                    className="w-32 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-32 px-3 py-2 border border-input rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
                 {unit && (
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                    <span className="text-sm text-muted-foreground">
                         {unit}
                     </span>
                 )}
@@ -122,18 +125,18 @@ interface SelectProps {
 function Select({ value, onChange, label, description, options }: SelectProps) {
     return (
         <div className="space-y-1">
-            <label className="font-medium text-gray-900 dark:text-gray-100">
+            <label className="font-medium text-foreground">
                 {label}
             </label>
             {description && (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-muted-foreground">
                     {description}
                 </p>
             )}
             <select
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
-                className="mt-2 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="mt-2 w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             >
                 {options.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -167,10 +170,10 @@ function NotificationChannels({ channels, onChange }: NotificationChannelProps) 
 
     return (
         <div className="space-y-2">
-            <label className="font-medium text-gray-900 dark:text-gray-100">
+            <label className="font-medium text-foreground">
                 Notification Channels
             </label>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-muted-foreground">
                 Select how you want to receive fraud alerts
             </p>
             <div className="flex flex-wrap gap-2 mt-2">
@@ -184,8 +187,8 @@ function NotificationChannels({ channels, onChange }: NotificationChannelProps) 
                             className={cn(
                                 "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
                                 isActive
-                                    ? "bg-blue-50 border-blue-500 text-blue-700 dark:bg-blue-900/30 dark:border-blue-400 dark:text-blue-300"
-                                    : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                                    ? "bg-info/10 border-info/50 text-info"
+                                    : "bg-background border-input text-foreground hover:bg-muted"
                             )}
                         >
                             <Icon className="w-4 h-4" />
@@ -212,16 +215,16 @@ function SettingsSection({
     children,
 }: SettingsSectionProps) {
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="panel p-5">
             <div className="flex items-start gap-4 mb-6">
-                <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-                    <Icon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <div className="p-2 bg-info/10 rounded-lg">
+                    <Icon className="w-5 h-5 text-info" />
                 </div>
                 <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                    <h3 className="panel-title">
                         {title}
                     </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-muted-foreground">
                         {description}
                     </p>
                 </div>
@@ -278,26 +281,78 @@ export default function FraudSettings() {
 
     return (
         <div className="space-y-6">
+            {/* Step Indicator */}
+            <div className="panel border-info/30 p-6">
+                <div className="flex items-center justify-between max-w-4xl mx-auto">
+                    {/* Step 1 - Complete */}
+                    <div className="flex items-center gap-3 flex-1 opacity-60">
+                        <div className="bg-up/20 text-up rounded-full w-10 h-10 flex items-center justify-center shadow-md">
+                            <Check className="h-5 w-5" />
+                        </div>
+                        <div>
+                            <p className="font-semibold text-sm text-foreground">Approval Settings</p>
+                            <p className="text-xs text-up font-medium">Complete</p>
+                        </div>
+                    </div>
+                    <ArrowRight className="h-5 w-5 text-muted-foreground mx-2" />
+
+                    {/* Step 2 - Complete */}
+                    <div className="flex items-center gap-3 flex-1 opacity-60">
+                        <div className="bg-up/20 text-up rounded-full w-10 h-10 flex items-center justify-center shadow-md">
+                            <Check className="h-5 w-5" />
+                        </div>
+                        <div>
+                            <p className="font-semibold text-sm text-foreground">Exposure Control</p>
+                            <p className="text-xs text-up font-medium">Complete</p>
+                        </div>
+                    </div>
+                    <ArrowRight className="h-5 w-5 text-muted-foreground mx-2" />
+
+                    {/* Step 3 - Active */}
+                    <div className="flex items-center gap-3 flex-1">
+                        <div className="bg-primary text-primary-foreground rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg shadow-md">
+                            3
+                        </div>
+                        <div>
+                            <p className="font-bold text-primary text-sm">Fraud Mitigation</p>
+                            <p className="text-xs text-muted-foreground">Model & risk policy</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                        Automation Settings
+                    <h1 className="page-title flex items-center gap-3">
+                        <span className="bg-primary/10 text-primary rounded-lg w-12 h-12 flex items-center justify-center font-bold text-xl">3</span>
+                        Fraud Mitigation
                     </h1>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1">
-                        Configure fraud case handling automation and workflows
+                    <p className="page-desc ml-[60px]">
+                        Configure fraud detection automation and case handling workflows
                     </p>
                 </div>
+                <Link
+                    to={`/systems/${systemId}/exposure`}
+                    className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-sm"
+                >
+                    <ArrowLeft className="h-4 w-4" />
+                    Back to Step 2
+                </Link>
+            </div>
+
+            {/* Save Button Row */}
+            <div className="flex items-center justify-end">
                 <button
                     onClick={handleSave}
                     disabled={!hasChanges || saving}
                     className={cn(
-                        "flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all",
+                        "flex items-center gap-2 px-6 py-3 rounded-lg font-bold transition-all shadow-md",
                         hasChanges && !saving
-                            ? "bg-blue-600 hover:bg-blue-700 text-white"
+                            ? "bg-primary hover:bg-primary/90 text-primary-foreground hover:shadow-lg"
                             : saved
-                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                            : "bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-gray-800"
+                            ? "bg-up/20 text-up"
+                            : "bg-muted text-muted-foreground cursor-not-allowed"
                     )}
                 >
                     {saving ? (
@@ -307,26 +362,26 @@ export default function FraudSettings() {
                         </>
                     ) : saved ? (
                         <>
-                            <CheckCircle2 className="w-4 h-4" />
-                            Saved
+                            <CheckCircle2 className="w-5 h-5" />
+                            Fraud Settings Saved
                         </>
                     ) : (
                         <>
-                            <Save className="w-4 h-4" />
-                            Save Changes
+                            <Save className="w-5 h-5" />
+                            Save Fraud Settings
                         </>
                     )}
                 </button>
             </div>
 
             {/* Warning Banner */}
-            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="panel border-warn/30 p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-warn flex-shrink-0 mt-0.5" />
                 <div>
-                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                    <p className="font-medium text-foreground">
                         Changes affect live fraud processing
                     </p>
-                    <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                    <p className="text-sm text-muted-foreground mt-1">
                         Automation settings are applied immediately to incoming fraud cases.
                         Review changes carefully before saving.
                     </p>
@@ -395,10 +450,10 @@ export default function FraudSettings() {
                 />
 
                 {settings.auto_decision_enabled && (
-                    <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 space-y-6">
+                    <div className="bg-muted/30 rounded-lg p-4 space-y-6">
                         <div className="flex items-start gap-2">
-                            <Info className="w-4 h-4 text-blue-500 mt-0.5" />
-                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                            <Info className="w-4 h-4 text-info mt-0.5" />
+                            <p className="text-sm text-muted-foreground">
                                 Cases with scores between the thresholds will require manual review.
                             </p>
                         </div>
@@ -425,12 +480,12 @@ export default function FraudSettings() {
 
                         {/* Visual Score Range */}
                         <div className="mt-4">
-                            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            <div className="text-sm font-medium text-foreground mb-2">
                                 Score Range Visualization
                             </div>
                             <div className="relative h-8 rounded-lg overflow-hidden flex">
                                 <div
-                                    className="bg-green-500 flex items-center justify-center text-xs font-medium text-white"
+                                    className="bg-up flex items-center justify-center text-xs font-medium text-white"
                                     style={{
                                         width: `${(settings.auto_approve_below_score / 1000) * 100}%`,
                                     }}
@@ -438,7 +493,7 @@ export default function FraudSettings() {
                                     {settings.auto_approve_below_score > 100 && "Auto-Approve"}
                                 </div>
                                 <div
-                                    className="bg-amber-400 flex items-center justify-center text-xs font-medium text-amber-900"
+                                    className="bg-warn flex items-center justify-center text-xs font-medium text-background"
                                     style={{
                                         width: `${
                                             ((settings.auto_decline_above_score -
@@ -451,7 +506,7 @@ export default function FraudSettings() {
                                     Manual Review
                                 </div>
                                 <div
-                                    className="bg-red-500 flex items-center justify-center text-xs font-medium text-white"
+                                    className="bg-down flex items-center justify-center text-xs font-medium text-white"
                                     style={{
                                         width: `${
                                             ((1000 - settings.auto_decline_above_score) / 1000) * 100
@@ -461,7 +516,7 @@ export default function FraudSettings() {
                                     {1000 - settings.auto_decline_above_score > 100 && "Auto-Decline"}
                                 </div>
                             </div>
-                            <div className="flex justify-between text-xs text-gray-500 mt-1">
+                            <div className="flex justify-between text-xs text-muted-foreground mt-1">
                                 <span>0</span>
                                 <span>{settings.auto_approve_below_score}</span>
                                 <span>{settings.auto_decline_above_score}</span>
@@ -549,6 +604,60 @@ export default function FraudSettings() {
                     />
                 )}
             </SettingsSection>
+
+            {/* Completion Banner */}
+            {saved && (
+                <div className="panel border-up/30 p-8">
+                    <div className="flex items-start gap-6">
+                        <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-3">
+                                <div className="bg-up/20 rounded-full w-12 h-12 flex items-center justify-center">
+                                    <CheckCircle2 className="h-7 w-7 text-up" />
+                                </div>
+                                <div>
+                                    <h3 className="text-2xl font-bold text-foreground">Configuration Complete!</h3>
+                                    <p className="text-sm text-muted-foreground">All 3 steps configured successfully</p>
+                                </div>
+                            </div>
+                            <div className="bg-muted/30 rounded-lg p-4 mb-4 border border-up/20">
+                                <p className="text-sm text-foreground mb-3">
+                                    <strong>Your policy is now fully configured with:</strong>
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                    <div className="flex items-start gap-2">
+                                        <Check className="h-4 w-4 text-up flex-shrink-0 mt-0.5" />
+                                        <span className="text-muted-foreground">Approval thresholds & risk acceptance targets</span>
+                                    </div>
+                                    <div className="flex items-start gap-2">
+                                        <Check className="h-4 w-4 text-up flex-shrink-0 mt-0.5" />
+                                        <span className="text-muted-foreground">Per-decile exposure limits to reduce losses</span>
+                                    </div>
+                                    <div className="flex items-start gap-2">
+                                        <Check className="h-4 w-4 text-up flex-shrink-0 mt-0.5" />
+                                        <span className="text-muted-foreground">Automated fraud detection & case handling</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex gap-3">
+                                <Link
+                                    to={`/systems/${systemId}/overview`}
+                                    className="btn-primary inline-flex items-center gap-2 px-6 py-3 font-bold"
+                                >
+                                    View System Overview
+                                    <ArrowRight className="h-5 w-5" />
+                                </Link>
+                                <Link
+                                    to={`/systems/${systemId}/policy`}
+                                    className="btn-outline inline-flex items-center gap-2 px-6 py-3 font-medium"
+                                >
+                                    <ArrowLeft className="h-4 w-4" />
+                                    Review All Settings
+                                </Link>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

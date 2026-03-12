@@ -69,13 +69,17 @@ export const MODULE_REGISTRY: Record<SystemModule, ModuleDefinition> = {
         id: "fraud_detection",
         name: "Fraud Detection",
         shortName: "Fraud",
-        description: "Real-time fraud scoring, case queue, investigation, and rules engine",
+        description: "Fraud model training, risk tier configuration, and disposition management",
         icon: ShieldAlert,
         color: "orange",
         badgeClasses: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
         dependencies: [],
         navItems: [
-            { path: "fraud", label: "Fraud Management", icon: ShieldAlert },
+            { path: "fraud/overview", label: "Fraud Overview", icon: ShieldAlert },
+            { path: "fraud/data", label: "Fraud Data", icon: Database },
+            { path: "fraud/training", label: "Fraud Training", icon: BrainCircuit },
+            { path: "fraud/models", label: "Fraud Models", icon: Shield },
+            { path: "fraud/tiers", label: "Risk Tiers", icon: Sliders },
         ],
     },
     exposure_control: {
@@ -98,8 +102,8 @@ export const MODULE_REGISTRY: Record<SystemModule, ModuleDefinition> = {
 export const MODULE_ORDER: SystemModule[] = [
     "credit_scoring",
     "policy_engine",
-    "fraud_detection",
     "exposure_control",
+    "fraud_detection",
 ];
 
 // ─── Templates ───────────────────────────────────────────────
@@ -188,15 +192,35 @@ export function isModuleEnabled(
 }
 
 /**
- * Build the navigation items for a system based on its enabled modules.
+ * Map a system_type to the modules it includes.
+ */
+export function getModulesForSystemType(systemType: string): SystemModule[] {
+    switch (systemType) {
+        case "credit":
+            return ["credit_scoring", "policy_engine", "exposure_control"];
+        case "fraud":
+            return ["fraud_detection"];
+        case "full":
+        default:
+            return [...MODULE_ORDER];
+    }
+}
+
+/**
+ * Build the navigation items for a system based on its system_type.
+ * Falls back to enabled_modules for backward compatibility.
  */
 export function buildNavItems(
     systemId: string,
-    enabledModules: SystemModule[] | undefined
+    enabledModules: SystemModule[] | undefined,
+    systemType?: string
 ): { to: string; icon: LucideIcon; label: string }[] {
-    const modules = enabledModules && enabledModules.length > 0
-        ? enabledModules
-        : MODULE_ORDER; // fallback: all modules
+    // Prefer system_type if available
+    const modules = systemType
+        ? getModulesForSystemType(systemType)
+        : enabledModules && enabledModules.length > 0
+            ? enabledModules
+            : MODULE_ORDER;
 
     const items: { to: string; icon: LucideIcon; label: string }[] = [];
 
@@ -235,11 +259,20 @@ export function getRouteLabels(): Record<string, string> {
     }
 
     // Fraud sub-pages
+    labels["overview"] = "Fraud Overview";
+    labels["detection"] = "Fraud Overview";
+    labels["data"] = "Fraud Data";
+    labels["training"] = "Fraud Training";
+    labels["workflow"] = "Review Workflow";
+    labels["operations"] = "Fraud Operations";
     labels["queue"] = "Case Queue";
     labels["cases"] = "Case Detail";
-    labels["rules"] = "Rules";
+    labels["rules"] = "Detection Rules";
+
+    labels["tiers"] = "Risk Tiers";
     labels["signals"] = "Signal Providers";
     labels["settings"] = "Automation Settings";
+    labels["monitoring"] = "Monitoring";
 
     return labels;
 }
@@ -254,7 +287,7 @@ export function getModuleForPath(pathSegment: string): SystemModule | null {
         }
     }
     // Fraud sub-routes
-    if (["queue", "cases", "rules", "signals", "settings"].includes(pathSegment)) {
+    if (["overview", "detection", "data", "training", "workflow", "operations", "queue", "cases", "rules", "models", "tiers", "signals", "settings"].includes(pathSegment)) {
         return "fraud_detection";
     }
     return null;

@@ -1,83 +1,169 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List
+from typing import Any, List, Optional
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from app.db.session import SessionLocal
 
-from app.db.session import get_db
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 from app.models.decision_system import DecisionSystem
-from app.schemas.decision_system import (
-    DecisionSystemCreate,
-    DecisionSystemUpdate,
-    DecisionSystemResponse,
-)
+from pydantic import BaseModel
+from datetime import datetime
 
-router = APIRouter(prefix="/systems", tags=["Decision Systems"])
+router = APIRouter()
 
+class DecisionSystemCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    system_type: Optional[str] = "full"  # "credit" | "fraud" | "full"
 
-@router.get("/", response_model=List[DecisionSystemResponse])
-async def list_systems(db: AsyncSession = Depends(get_db)):
-    """List all decision systems."""
-    result = await db.execute(select(DecisionSystem).order_by(DecisionSystem.created_at.desc()))
-    systems = result.scalars().all()
+class DecisionSystemOut(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    system_type: Optional[str] = "full"
+    created_at: datetime
+
+    active_model_id: Optional[str] = None
+    active_policy_id: Optional[str] = None
+
+    # Active Model/Policy info could be computed or fetched
+    active_model_summary: Optional[dict] = None
+    active_policy_summary: Optional[dict] = None
+
+    class Config:
+        from_attributes = True
+
+from app.api import deps
+from app.models.user import User
+
+@router.get("/", response_model=List[DecisionSystemOut])
+def list_systems(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    systems = db.query(DecisionSystem).filter(
+        DecisionSystem.client_id == current_user.client_id
+    ).order_by(DecisionSystem.created_at.desc()).all()
     return systems
 
-
-@router.post("/", response_model=DecisionSystemResponse, status_code=status.HTTP_201_CREATED)
-async def create_system(
-    system_in: DecisionSystemCreate,
-    db: AsyncSession = Depends(get_db),
+@router.post("/", response_model=DecisionSystemOut)
+def create_system(
+    system_in: DecisionSystemCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
 ):
-    """Create a new decision system."""
+    # Validate system_type
+    valid_types = ("credit", "fraud", "full")
+    st = system_in.system_type or "full"
+    if st not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid system_type. Must be one of: {valid_types}")
+
     system = DecisionSystem(
         name=system_in.name,
         description=system_in.description,
-        enabled_modules=system_in.enabled_modules,
+        system_type=st,
+        client_id=current_user.client_id # Strict ownership assignment
     )
     db.add(system)
-    await db.commit()
-    await db.refresh(system)
+    db.commit()
+    db.refresh(system)
     return system
 
-
-@router.get("/{system_id}", response_model=DecisionSystemResponse)
-async def get_system(system_id: str, db: AsyncSession = Depends(get_db)):
-    """Get a decision system by ID."""
-    result = await db.execute(select(DecisionSystem).where(DecisionSystem.id == system_id))
-    system = result.scalar_one_or_none()
-    if not system:
-        raise HTTPException(status_code=404, detail="System not found")
-    return system
-
-
-@router.patch("/{system_id}", response_model=DecisionSystemResponse)
-async def update_system(
-    system_id: str,
-    system_in: DecisionSystemUpdate,
-    db: AsyncSession = Depends(get_db),
+@router.get("/{system_id}", response_model=DecisionSystemOut)
+def get_system(
+    system_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
 ):
-    """Update a decision system."""
-    result = await db.execute(select(DecisionSystem).where(DecisionSystem.id == system_id))
-    system = result.scalar_one_or_none()
+    # Strict Isolation Check
+    system = db.query(DecisionSystem).filter(
+        DecisionSystem.id == system_id,
+        DecisionSystem.client_id == current_user.client_id
+    ).first()
+    
     if not system:
-        raise HTTPException(status_code=404, detail="System not found")
+        raise HTTPException(status_code=404, detail="Decision System not found")
+    
+    # Manually construct to avoid from_orm surprises
+    resp = DecisionSystemOut(
+        id=system.id,
+        name=system.name,
+        description=system.description,
+        system_type=system.system_type or "full",
+        created_at=system.created_at,
+        active_model_id=system.active_model_id,
+        active_policy_id=system.active_policy_id
+    )
 
-    update_data = system_in.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(system, field, value)
+    from app.models.ml_model import MLModel
+    from app.models.policy import Policy
+    
+    if system.active_model_id:
+        model = db.query(MLModel).filter(MLModel.id == system.active_model_id).first()
+        if model:
+            # Use default dict for safety if metrics is None
+            metrics = model.metrics or {}
+            resp.active_model_summary = {
+                "id": model.id,
+                "name": model.name,
+                "algorithm": model.algorithm,
+                "auc": metrics.get("auc", 0)
+            }
+            
+    if system.active_policy_id:
+        policy = db.query(Policy).filter(Policy.id == system.active_policy_id).first()
+        if policy:
+                resp.active_policy_summary = {
+                "name": f"Active Policy ({policy.target_decile * 10}% Target)" if policy.target_decile else "Active Policy",
+                "threshold": policy.threshold,
+                "approval_rate": policy.projected_approval_rate,
+                "target_decile": policy.target_decile
+            }
+    return resp
 
-    await db.commit()
-    await db.refresh(system)
-    return system
-
-
-@router.delete("/{system_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_system(system_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete a decision system."""
-    result = await db.execute(select(DecisionSystem).where(DecisionSystem.id == system_id))
-    system = result.scalar_one_or_none()
+@router.delete("/{system_id}")
+def delete_system(
+    system_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    system = db.query(DecisionSystem).filter(
+        DecisionSystem.id == system_id,
+        DecisionSystem.client_id == current_user.client_id
+    ).first()
+    
     if not system:
-        raise HTTPException(status_code=404, detail="System not found")
+        raise HTTPException(status_code=404, detail="Decision System not found")
+        
+    try:
+        db.delete(system)
+        db.commit()
+    except Exception as e:
+        print(f"Delete failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete system")
+        
+    return {"message": "System deleted"}
 
-    await db.delete(system)
-    await db.commit()
-    return None
+@router.post("/{system_id}/upgrade")
+def upgrade_system_type(
+    system_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """One-way upgrade: credit -> full, fraud -> full."""
+    system = db.query(DecisionSystem).filter(
+        DecisionSystem.id == system_id,
+        DecisionSystem.client_id == current_user.client_id
+    ).first()
+    if not system:
+        raise HTTPException(status_code=404, detail="Decision System not found")
+    if (system.system_type or "full") == "full":
+        raise HTTPException(status_code=400, detail="System is already Full Pipeline")
+    system.system_type = "full"
+    db.commit()
+    return {"message": "System upgraded to Full Pipeline", "system_type": "full"}
