@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Ensure Python output is sent straight to logs (no buffering)
+ENV PYTHONUNBUFFERED=1
+
 # Install system dependencies for psycopg2 and ML packages
 RUN apt-get update && apt-get install -y \
     gcc \
