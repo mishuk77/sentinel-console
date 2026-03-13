@@ -1,4 +1,5 @@
 import boto3
+from botocore.config import Config as BotoConfig
 import os
 from botocore.exceptions import ClientError
 from app.core.config import settings
@@ -8,18 +9,22 @@ class StorageService:
         self.mode = settings.STORAGE_TYPE  # "local" or "s3"
         print(f"Storage mode: {self.mode}")
         if self.mode == "s3":
+            # Use path-style for S3-compatible providers (Railway, MinIO)
             self.s3_client = boto3.client(
                 's3',
                 endpoint_url=settings.AWS_ENDPOINT_URL,
                 aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.S3_REGION_NAME
+                region_name=settings.S3_REGION_NAME or "us-east-1",
+                config=BotoConfig(s3={"addressing_style": "path"}, signature_version="s3v4"),
             )
             self.bucket = settings.S3_BUCKET_NAME
+            # Verify bucket is accessible (don't try to create — Railway manages it)
             try:
-                self.s3_client.create_bucket(Bucket=self.bucket)
-            except Exception:
-                pass # Bucket likely exists or we handle error later
+                self.s3_client.head_bucket(Bucket=self.bucket)
+                print(f"S3 bucket '{self.bucket}' accessible.")
+            except Exception as e:
+                print(f"Warning: S3 bucket check failed: {e}")
         else:
             # Local filesystem fallback for dev without Docker/MinIO
             self.local_storage_path = os.path.join(os.getcwd(), "local_storage")
