@@ -49,7 +49,9 @@ async def train_task(dataset_id: str, model_map: dict, target_col: str, feature_
             db.commit()
             
         except Exception as e:
+            import traceback
             print(f"Training failed: {e}")
+            traceback.print_exc()
             # Mark all as FAILED
             for mid in model_map.values():
                 model = db.query(MLModel).filter(MLModel.id == mid).first()

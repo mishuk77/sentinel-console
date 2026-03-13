@@ -5,7 +5,8 @@ from app.core.config import settings
 
 class StorageService:
     def __init__(self):
-        self.mode = "s3" if settings.ENV != "local" else "local"
+        self.mode = settings.STORAGE_TYPE  # "local" or "s3"
+        print(f"Storage mode: {self.mode}")
         if self.mode == "s3":
             self.s3_client = boto3.client(
                 's3',
