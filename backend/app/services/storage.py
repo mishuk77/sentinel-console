@@ -15,10 +15,10 @@ class StorageService:
                 endpoint_url=settings.AWS_ENDPOINT_URL,
                 aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.S3_REGION_NAME or "us-east-1",
+                region_name=settings.AWS_DEFAULT_REGION or "us-east-1",
                 config=BotoConfig(s3={"addressing_style": "path"}, signature_version="s3v4"),
             )
-            self.bucket = settings.S3_BUCKET_NAME
+            self.bucket = settings.AWS_S3_BUCKET_NAME
             # Verify bucket is accessible (don't try to create — Railway manages it)
             try:
                 self.s3_client.head_bucket(Bucket=self.bucket)

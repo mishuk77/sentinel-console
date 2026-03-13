@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str = "minioadmin"
     AWS_SECRET_ACCESS_KEY: str = "minioadmin"
     AWS_ENDPOINT_URL: str = "http://localhost:9000"
-    S3_BUCKET_NAME: str = "sentinel-artifacts"
-    S3_REGION_NAME: str = "us-east-1"
+    AWS_S3_BUCKET_NAME: str = "sentinel-artifacts"
+    AWS_DEFAULT_REGION: str = "us-east-1"
     STORAGE_TYPE: str = "local"  # local or s3
 
     class Config:
