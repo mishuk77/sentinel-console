@@ -17,13 +17,16 @@ def get_db():
         db.close()
 
 async def train_task(dataset_id: str, model_map: dict, target_col: str, feature_cols: List[str], model_context: str = "credit"):
+    print(f"[TRAIN] Background task started for dataset={dataset_id}, models={model_map}")
     db = SessionLocal()
     try:
         # Check dataset
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if not dataset:
-            print(f"Dataset {dataset_id} not found in background task")
+            print(f"[TRAIN] Dataset {dataset_id} not found in background task")
             return
+
+        print(f"[TRAIN] Dataset found: s3_key={dataset.s3_key}, target={target_col}, context={model_context}")
 
         # Execute Training — run in thread pool so event loop stays responsive
         import asyncio
@@ -31,6 +34,7 @@ async def train_task(dataset_id: str, model_map: dict, target_col: str, feature_
             results = await asyncio.to_thread(
                 training_service.train_models, dataset.s3_key, target_col, feature_cols, model_context
             )
+            print(f"[TRAIN] Training complete. {len(results)} results.")
             
             # Update Models
             for res in results:
@@ -110,6 +114,7 @@ async def train_dataset(
         
     db.commit()
         
+    print(f"[TRAIN] Queuing background task for dataset={dataset_id}, models={model_map}")
     background_tasks.add_task(train_task, dataset_id, model_map, train_req.target_col, train_req.feature_cols, train_req.model_context or "credit")
     return {"message": "Training started", "models": model_map}
 
