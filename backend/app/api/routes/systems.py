@@ -141,48 +141,41 @@ def delete_system(
         raise HTTPException(status_code=404, detail="Decision System not found")
         
     try:
-        # Clear self-referencing FKs first
-        system.active_model_id = None
-        system.active_fraud_model_id = None
-        system.active_policy_id = None
-        db.flush()
+        from sqlalchemy import text
+        # Use raw SQL with CASCADE-like behavior to avoid FK ordering issues
+        # Delete all child records across every referencing table
+        tables_with_decision_system_id = [
+            "decisions", "ml_models", "policy_segments", "policies",
+            "datasets", "fraud_cases", "fraud_rules", "fraud_models",
+            "signal_providers", "fraud_tier_configs", "fraud_settings",
+        ]
+        tables_with_system_id = [
+            "audit_logs", "exposure_limits",
+        ]
 
-        # Delete child records in dependency order
-        from app.models.ml_model import MLModel
-        from app.models.dataset import Dataset
-        from app.models.decision import Decision
-        from app.models.policy import Policy
-        from app.models.policy_segment import PolicySegment
-        from app.models.audit_log import AuditLog
-        from app.models.exposure_limit import ExposureLimit
+        # Clear self-referencing columns
+        db.execute(text(
+            "UPDATE decision_systems SET active_model_id = NULL, active_fraud_model_id = NULL, active_policy_id = NULL WHERE id = :sid"
+        ), {"sid": system_id})
 
-        # Decisions reference policies, so delete first
-        db.query(Decision).filter(Decision.decision_system_id == system_id).delete()
-        # Models reference datasets, so delete first
-        db.query(MLModel).filter(MLModel.decision_system_id == system_id).delete()
-        # PolicySegments reference policies, so delete first
-        policy_ids = [p.id for p in db.query(Policy.id).filter(Policy.decision_system_id == system_id).all()]
-        if policy_ids:
-            db.query(PolicySegment).filter(PolicySegment.policy_id.in_(policy_ids)).delete(synchronize_session=False)
-        db.query(Policy).filter(Policy.decision_system_id == system_id).delete()
-        db.query(Dataset).filter(Dataset.decision_system_id == system_id).delete()
-        # Tables with CASCADE should auto-delete, but be explicit
-        db.query(AuditLog).filter(AuditLog.system_id == system_id).delete()
-        db.query(ExposureLimit).filter(ExposureLimit.system_id == system_id).delete()
+        # Delete policy_segments via subquery (references policies, not systems directly)
+        db.execute(text(
+            "DELETE FROM policy_segments WHERE policy_id IN (SELECT id FROM policies WHERE decision_system_id = :sid)"
+        ), {"sid": system_id})
 
-        # Delete fraud tables
-        try:
-            from app.models.fraud import FraudCase, FraudRule, FraudModel, SignalProvider, FraudTierConfig, FraudSettings
-            db.query(FraudCase).filter(FraudCase.decision_system_id == system_id).delete()
-            db.query(FraudRule).filter(FraudRule.decision_system_id == system_id).delete()
-            db.query(FraudModel).filter(FraudModel.decision_system_id == system_id).delete()
-            db.query(SignalProvider).filter(SignalProvider.decision_system_id == system_id).delete()
-            db.query(FraudTierConfig).filter(FraudTierConfig.decision_system_id == system_id).delete()
-            db.query(FraudSettings).filter(FraudSettings.decision_system_id == system_id).delete()
-        except Exception:
-            pass  # Fraud tables may not exist yet
+        for table in tables_with_decision_system_id:
+            try:
+                db.execute(text(f"DELETE FROM {table} WHERE decision_system_id = :sid"), {"sid": system_id})
+            except Exception:
+                pass
 
-        db.delete(system)
+        for table in tables_with_system_id:
+            try:
+                db.execute(text(f"DELETE FROM {table} WHERE system_id = :sid"), {"sid": system_id})
+            except Exception:
+                pass
+
+        db.execute(text("DELETE FROM decision_systems WHERE id = :sid"), {"sid": system_id})
         db.commit()
     except Exception as e:
         db.rollback()
