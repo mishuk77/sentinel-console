@@ -74,6 +74,41 @@ def startup_event():
                     conn.commit()
                 print(f"MIGRATION: '{col_name}' column added.")
 
+    # MANUAL MIGRATION CHECK: policies columns
+    if "policies" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("policies")]
+        policy_migrations = {
+            "model_id": "VARCHAR",
+            "threshold": "FLOAT",
+            "projected_approval_rate": "FLOAT",
+            "projected_loss_rate": "FLOAT",
+            "target_decile": "INTEGER",
+            "amount_ladder": "JSON",
+            "is_active": "BOOLEAN DEFAULT FALSE",
+            "decision_system_id": "VARCHAR",
+        }
+        for col_name, col_type in policy_migrations.items():
+            if col_name not in columns:
+                print(f"MIGRATION: Adding '{col_name}' to policies table...")
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE policies ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                print(f"MIGRATION: '{col_name}' column added.")
+
+    # MANUAL MIGRATION CHECK: models columns
+    if "models" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("models")]
+        model_migrations = {
+            "decision_system_id": "VARCHAR",
+        }
+        for col_name, col_type in model_migrations.items():
+            if col_name not in columns:
+                print(f"MIGRATION: Adding '{col_name}' to models table...")
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE models ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                print(f"MIGRATION: '{col_name}' column added.")
+
     Base.metadata.create_all(bind=engine)
     print("Database schema initialized.")
 
