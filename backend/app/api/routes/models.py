@@ -16,27 +16,24 @@ def get_db():
     finally:
         db.close()
 
-async def train_task(dataset_id: str, model_map: dict, target_col: str, feature_cols: List[str], model_context: str = "credit"):
-    print(f"[TRAIN] Background task started for dataset={dataset_id}, models={model_map}")
+import logging
+logger = logging.getLogger("sentinel.training")
+
+def train_task(dataset_id: str, model_map: dict, target_col: str, feature_cols: List[str], model_context: str = "credit"):
+    logger.info(f"[TRAIN] Background task started for dataset={dataset_id}, models={model_map}")
     db = SessionLocal()
     try:
-        # Check dataset
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if not dataset:
-            print(f"[TRAIN] Dataset {dataset_id} not found in background task")
+            logger.error(f"[TRAIN] Dataset {dataset_id} not found in background task")
             return
 
-        print(f"[TRAIN] Dataset found: s3_key={dataset.s3_key}, target={target_col}, context={model_context}")
+        logger.info(f"[TRAIN] Dataset found: s3_key={dataset.s3_key}, target={target_col}, context={model_context}")
 
-        # Execute Training — run in thread pool so event loop stays responsive
-        import asyncio
         try:
-            results = await asyncio.to_thread(
-                training_service.train_models, dataset.s3_key, target_col, feature_cols, model_context
-            )
-            print(f"[TRAIN] Training complete. {len(results)} results.")
-            
-            # Update Models
+            results = training_service.train_models(dataset.s3_key, target_col, feature_cols, model_context)
+            logger.info(f"[TRAIN] Training complete. {len(results)} results.")
+
             for res in results:
                 algo_name = res['name']
                 if algo_name in model_map:
@@ -49,20 +46,24 @@ async def train_task(dataset_id: str, model_map: dict, target_col: str, feature_
                         flag_modified(model, "metrics")
                         model.artifact_path = res['artifact_path']
                         model.name = f"{algo_name}_{model_id[:8]}"
-            
+
             db.commit()
-            
+            logger.info("[TRAIN] Models updated in DB.")
+
         except Exception as e:
             import traceback
-            print(f"Training failed: {e}")
-            traceback.print_exc()
-            # Mark all as FAILED
+            logger.error(f"[TRAIN] Training failed: {e}")
+            logger.error(traceback.format_exc())
             for mid in model_map.values():
                 model = db.query(MLModel).filter(MLModel.id == mid).first()
                 if model:
                     model.status = ModelStatus.FAILED
             db.commit()
 
+    except Exception as e:
+        import traceback
+        logger.error(f"[TRAIN] Outer exception: {e}")
+        logger.error(traceback.format_exc())
     finally:
         db.close()
 
