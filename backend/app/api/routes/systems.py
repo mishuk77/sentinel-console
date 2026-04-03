@@ -141,10 +141,22 @@ def delete_system(
         raise HTTPException(status_code=404, detail="Decision System not found")
         
     try:
+        # Delete child records that lack ondelete CASCADE
+        from app.models.ml_model import MLModel
+        from app.models.dataset import Dataset
+        from app.models.decision import Decision
+        from app.models.policy import Policy
+        db.query(MLModel).filter(MLModel.decision_system_id == system_id).delete()
+        db.query(Dataset).filter(Dataset.decision_system_id == system_id).delete()
+        db.query(Decision).filter(Decision.decision_system_id == system_id).delete()
+        db.query(Policy).filter(Policy.decision_system_id == system_id).delete()
         db.delete(system)
         db.commit()
     except Exception as e:
+        db.rollback()
         print(f"Delete failed: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to delete system")
         
     return {"message": "System deleted"}
