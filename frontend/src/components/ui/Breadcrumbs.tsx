@@ -1,153 +1,109 @@
 import { Link, useLocation, useParams } from "react-router-dom";
 import { ChevronRight, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getRouteLabels } from "@/lib/modules";
 
 interface BreadcrumbsProps {
     systemName?: string;
 }
 
-// Get route labels from module registry (plus additional mappings)
-const routeLabels = getRouteLabels();
+// Section 1: Credit pipeline routes (top-level under system)
+const creditLabels: Record<string, string> = {
+    overview: "System Overview",
+    data: "Datasets",
+    training: "Training Runs",
+    models: "Models",
+    policy: "Policy",
+    exposure: "Exposure Control",
+};
 
-// Labels for fraud sub-routes
-const fraudSubLabels: Record<string, string> = {
-    queue: "Case Queue",
-    cases: "Case Detail",
-    rules: "Rules",
-    models: "ML Models",
-    signals: "Signal Providers",
-    settings: "Automation Settings",
-    data: "Fraud Data",
-    training: "Fraud Training",
+// Section 2: Fraud pipeline routes (under system/fraud/*)
+const fraudLabels: Record<string, string> = {
     overview: "Fraud Overview",
     detection: "Fraud Overview",
+    data: "Fraud Data",
+    training: "Fraud Training",
+    models: "Fraud Models",
     tiers: "Risk Tiers",
+    queue: "Case Queue",
+    cases: "Case Detail",
+    rules: "Detection Rules",
+    signals: "Signal Providers",
+    settings: "Fraud Settings",
     operations: "Operations",
     workflow: "Review Workflow",
+};
+
+// Section 3: Other routes
+const otherLabels: Record<string, string> = {
+    monitoring: "Monitoring",
+    deployments: "Integration",
+    decisions: "Decisions",
 };
 
 export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
     const location = useLocation();
     const { systemId, id: modelId } = useParams();
 
-    // Parse the path into segments
     const pathSegments = location.pathname.split("/").filter(Boolean);
-
-    // Build breadcrumb items
     const items: { label: string; href?: string }[] = [];
 
-    // Always start with home -> systems
     items.push({ label: "Home", href: "/" });
     items.push({ label: "Systems", href: "/systems" });
 
-    // If we have a systemId, add the system name
     if (systemId) {
         items.push({
             label: systemName || "System",
             href: `/systems/${systemId}/overview`
         });
 
-        // Find the current page segment
         const systemIndex = pathSegments.indexOf(systemId);
         if (systemIndex >= 0 && pathSegments[systemIndex + 1]) {
             const pageSegment = pathSegments[systemIndex + 1];
-            const pageLabel = routeLabels[pageSegment] || pageSegment;
 
-            // If we're on a model detail page
-            if (pageSegment === "models" && modelId) {
+            if (pageSegment === "fraud") {
+                // Section 2: Fraud routes — show "Fraud Overview" as parent
+                const subSegment = pathSegments[systemIndex + 2];
+
+                if (subSegment && subSegment !== "overview" && subSegment !== "detection") {
+                    // Nested fraud page: Fraud Overview > Sub-page
+                    items.push({
+                        label: "Fraud Overview",
+                        href: `/systems/${systemId}/fraud/overview`
+                    });
+
+                    if (subSegment === "cases") {
+                        const caseId = pathSegments[systemIndex + 3];
+                        items.push({
+                            label: "Case Queue",
+                            href: `/systems/${systemId}/fraud/queue`
+                        });
+                        items.push({
+                            label: caseId ? `Case ${caseId.slice(0, 8)}...` : "Case Detail",
+                        });
+                    } else {
+                        items.push({
+                            label: fraudLabels[subSegment] || subSegment,
+                        });
+                    }
+                } else {
+                    // Fraud overview itself
+                    items.push({ label: "Fraud Overview" });
+                }
+            } else if (pageSegment === "models" && modelId) {
+                // Model detail page
                 items.push({
-                    label: pageLabel,
+                    label: "Models",
                     href: `/systems/${systemId}/models`
                 });
                 items.push({
                     label: `Model ${modelId.slice(0, 8)}...`,
-                    href: undefined // Current page
                 });
-            } else if (pageSegment === "fraud") {
-                // Handle nested fraud routes
-                const subSegment = pathSegments[systemIndex + 2];
-
-                if (subSegment && fraudSubLabels[subSegment] && !["queue", "cases", "rules", "models", "signals", "settings"].includes(subSegment)) {
-                    // Simple fraud sub-pages (data, training, overview, tiers, etc.)
-                    items.push({
-                        label: pageLabel,
-                        href: `/systems/${systemId}/fraud`
-                    });
-                    items.push({
-                        label: fraudSubLabels[subSegment],
-                        href: undefined
-                    });
-                } else if (subSegment === "queue") {
-                    items.push({
-                        label: pageLabel,
-                        href: `/systems/${systemId}/fraud`
-                    });
-                    items.push({
-                        label: routeLabels.queue,
-                        href: undefined
-                    });
-                } else if (subSegment === "cases") {
-                    const caseId = pathSegments[systemIndex + 3];
-                    items.push({
-                        label: pageLabel,
-                        href: `/systems/${systemId}/fraud`
-                    });
-                    items.push({
-                        label: routeLabels.queue,
-                        href: `/systems/${systemId}/fraud/queue`
-                    });
-                    items.push({
-                        label: caseId ? `Case ${caseId.slice(0, 8)}...` : "Case Detail",
-                        href: undefined
-                    });
-                } else if (subSegment === "rules") {
-                    items.push({
-                        label: pageLabel,
-                        href: `/systems/${systemId}/fraud`
-                    });
-                    items.push({
-                        label: fraudSubLabels.rules,
-                        href: undefined
-                    });
-                } else if (subSegment === "models") {
-                    items.push({
-                        label: pageLabel,
-                        href: `/systems/${systemId}/fraud`
-                    });
-                    items.push({
-                        label: fraudSubLabels.models,
-                        href: undefined
-                    });
-                } else if (subSegment === "signals") {
-                    items.push({
-                        label: pageLabel,
-                        href: `/systems/${systemId}/fraud`
-                    });
-                    items.push({
-                        label: fraudSubLabels.signals,
-                        href: undefined
-                    });
-                } else if (subSegment === "settings") {
-                    items.push({
-                        label: pageLabel,
-                        href: `/systems/${systemId}/fraud`
-                    });
-                    items.push({
-                        label: fraudSubLabels.settings,
-                        href: undefined
-                    });
-                } else {
-                    items.push({
-                        label: pageLabel,
-                        href: undefined
-                    });
-                }
             } else {
-                items.push({
-                    label: pageLabel,
-                    href: undefined // Current page
-                });
+                // Section 1 (credit) or Section 3 (other)
+                const label = creditLabels[pageSegment]
+                    || otherLabels[pageSegment]
+                    || pageSegment;
+                items.push({ label });
             }
         }
     }
