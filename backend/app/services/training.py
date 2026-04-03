@@ -11,6 +11,7 @@ import joblib
 import os
 import io
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.services.storage import storage
 
 class TrainingService:
@@ -142,12 +143,12 @@ class TrainingService:
 
         # 2. Train Candidates
         candidates = [
-            ("logistic_regression", LogisticRegression(max_iter=1000, n_jobs=1)),
-            ("random_forest", RandomForestClassifier(n_estimators=50, max_depth=10, n_jobs=1)),
-            ("xgboost", xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', n_jobs=1, max_depth=6))
+            ("logistic_regression", LogisticRegression(max_iter=1000, n_jobs=-1)),
+            ("random_forest", RandomForestClassifier(n_estimators=50, max_depth=10, n_jobs=-1)),
+            ("xgboost", xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', n_jobs=-1, max_depth=6))
         ]
 
-        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
 
         for name, clf in candidates:
             version_id = str(uuid.uuid4())
@@ -163,7 +164,7 @@ class TrainingService:
             cv_auc_mean = None
             cv_auc_std = None
             try:
-                raw_cv = cross_val_score(clf, X_train, y_train, cv=skf, scoring='roc_auc', n_jobs=1)
+                raw_cv = cross_val_score(clf, X_train, y_train, cv=skf, scoring='roc_auc', n_jobs=-1)
                 cv_fold_scores = [round(float(s), 5) for s in raw_cv]
                 cv_auc_mean = round(float(raw_cv.mean()), 5)
                 cv_auc_std  = round(float(raw_cv.std()),  5)
