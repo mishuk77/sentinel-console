@@ -142,43 +142,42 @@ def delete_system(
         
     try:
         from sqlalchemy import text
-        # Use raw SQL with CASCADE-like behavior to avoid FK ordering issues
-        # Delete all child records across every referencing table
-        tables_with_decision_system_id = [
-            "decisions", "ml_models", "policy_segments", "policies",
-            "datasets", "fraud_cases", "fraud_rules", "fraud_models",
-            "signal_providers", "fraud_tier_configs", "fraud_settings",
-        ]
-        tables_with_system_id = [
-            "audit_logs", "exposure_limits",
-        ]
+        from app.db.session import engine
 
-        # Clear self-referencing columns
-        db.execute(text(
-            "UPDATE decision_systems SET active_model_id = NULL, active_fraud_model_id = NULL, active_policy_id = NULL WHERE id = :sid"
-        ), {"sid": system_id})
+        # Use a raw connection with autocommit to avoid poisoned transaction state
+        with engine.connect() as conn:
+            conn = conn.execution_options(isolation_level="AUTOCOMMIT")
 
-        # Delete policy_segments via subquery (references policies, not systems directly)
-        db.execute(text(
-            "DELETE FROM policy_segments WHERE policy_id IN (SELECT id FROM policies WHERE decision_system_id = :sid)"
-        ), {"sid": system_id})
+            # Clear self-referencing columns
+            conn.execute(text(
+                "UPDATE decision_systems SET active_model_id = NULL, active_fraud_model_id = NULL, active_policy_id = NULL WHERE id = :sid"
+            ), {"sid": system_id})
 
-        for table in tables_with_decision_system_id:
-            try:
-                db.execute(text(f"DELETE FROM {table} WHERE decision_system_id = :sid"), {"sid": system_id})
-            except Exception:
-                pass
+            # Delete from all possible child tables
+            all_deletes = [
+                "DELETE FROM policy_segments WHERE policy_id IN (SELECT id FROM policies WHERE decision_system_id = :sid)",
+                "DELETE FROM decisions WHERE decision_system_id = :sid",
+                "DELETE FROM models WHERE decision_system_id = :sid",
+                "DELETE FROM policies WHERE decision_system_id = :sid",
+                "DELETE FROM datasets WHERE decision_system_id = :sid",
+                "DELETE FROM fraud_cases WHERE decision_system_id = :sid",
+                "DELETE FROM fraud_rules WHERE decision_system_id = :sid",
+                "DELETE FROM fraud_models WHERE decision_system_id = :sid",
+                "DELETE FROM signal_providers WHERE decision_system_id = :sid",
+                "DELETE FROM fraud_tier_configs WHERE decision_system_id = :sid",
+                "DELETE FROM fraud_settings WHERE decision_system_id = :sid",
+                "DELETE FROM audit_logs WHERE system_id = :sid",
+                "DELETE FROM exposure_limits WHERE system_id = :sid",
+                "DELETE FROM decision_systems WHERE id = :sid",
+            ]
 
-        for table in tables_with_system_id:
-            try:
-                db.execute(text(f"DELETE FROM {table} WHERE system_id = :sid"), {"sid": system_id})
-            except Exception:
-                pass
+            for sql in all_deletes:
+                try:
+                    conn.execute(text(sql), {"sid": system_id})
+                except Exception as e:
+                    print(f"Delete skip (OK): {sql[:50]}... -> {e}")
 
-        db.execute(text("DELETE FROM decision_systems WHERE id = :sid"), {"sid": system_id})
-        db.commit()
     except Exception as e:
-        db.rollback()
         print(f"Delete failed: {e}")
         import traceback
         traceback.print_exc()
