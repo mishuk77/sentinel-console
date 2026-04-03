@@ -141,15 +141,47 @@ def delete_system(
         raise HTTPException(status_code=404, detail="Decision System not found")
         
     try:
-        # Delete child records that lack ondelete CASCADE
+        # Clear self-referencing FKs first
+        system.active_model_id = None
+        system.active_fraud_model_id = None
+        system.active_policy_id = None
+        db.flush()
+
+        # Delete child records in dependency order
         from app.models.ml_model import MLModel
         from app.models.dataset import Dataset
         from app.models.decision import Decision
         from app.models.policy import Policy
-        db.query(MLModel).filter(MLModel.decision_system_id == system_id).delete()
-        db.query(Dataset).filter(Dataset.decision_system_id == system_id).delete()
+        from app.models.policy_segment import PolicySegment
+        from app.models.audit_log import AuditLog
+        from app.models.exposure_limit import ExposureLimit
+
+        # Decisions reference policies, so delete first
         db.query(Decision).filter(Decision.decision_system_id == system_id).delete()
+        # Models reference datasets, so delete first
+        db.query(MLModel).filter(MLModel.decision_system_id == system_id).delete()
+        # PolicySegments reference policies, so delete first
+        policy_ids = [p.id for p in db.query(Policy.id).filter(Policy.decision_system_id == system_id).all()]
+        if policy_ids:
+            db.query(PolicySegment).filter(PolicySegment.policy_id.in_(policy_ids)).delete(synchronize_session=False)
         db.query(Policy).filter(Policy.decision_system_id == system_id).delete()
+        db.query(Dataset).filter(Dataset.decision_system_id == system_id).delete()
+        # Tables with CASCADE should auto-delete, but be explicit
+        db.query(AuditLog).filter(AuditLog.system_id == system_id).delete()
+        db.query(ExposureLimit).filter(ExposureLimit.system_id == system_id).delete()
+
+        # Delete fraud tables
+        try:
+            from app.models.fraud import FraudCase, FraudRule, FraudModel, SignalProvider, FraudTierConfig, FraudSettings
+            db.query(FraudCase).filter(FraudCase.decision_system_id == system_id).delete()
+            db.query(FraudRule).filter(FraudRule.decision_system_id == system_id).delete()
+            db.query(FraudModel).filter(FraudModel.decision_system_id == system_id).delete()
+            db.query(SignalProvider).filter(SignalProvider.decision_system_id == system_id).delete()
+            db.query(FraudTierConfig).filter(FraudTierConfig.decision_system_id == system_id).delete()
+            db.query(FraudSettings).filter(FraudSettings.decision_system_id == system_id).delete()
+        except Exception:
+            pass  # Fraud tables may not exist yet
+
         db.delete(system)
         db.commit()
     except Exception as e:
