@@ -10,7 +10,7 @@ interface BreadcrumbsProps {
 // Get route labels from module registry (plus additional mappings)
 const routeLabels = getRouteLabels();
 
-// Labels for fraud sub-routes when "models" is under fraud context
+// Labels for fraud sub-routes
 const fraudSubLabels: Record<string, string> = {
     queue: "Case Queue",
     cases: "Case Detail",
@@ -18,6 +18,13 @@ const fraudSubLabels: Record<string, string> = {
     models: "ML Models",
     signals: "Signal Providers",
     settings: "Automation Settings",
+    data: "Fraud Data",
+    training: "Fraud Training",
+    overview: "Fraud Overview",
+    detection: "Fraud Overview",
+    tiers: "Risk Tiers",
+    operations: "Operations",
+    workflow: "Review Workflow",
 };
 
 export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
@@ -61,7 +68,17 @@ export function Breadcrumbs({ systemName }: BreadcrumbsProps) {
                 // Handle nested fraud routes
                 const subSegment = pathSegments[systemIndex + 2];
 
-                if (subSegment === "queue") {
+                if (subSegment && fraudSubLabels[subSegment] && !["queue", "cases", "rules", "models", "signals", "settings"].includes(subSegment)) {
+                    // Simple fraud sub-pages (data, training, overview, tiers, etc.)
+                    items.push({
+                        label: pageLabel,
+                        href: `/systems/${systemId}/fraud`
+                    });
+                    items.push({
+                        label: fraudSubLabels[subSegment],
+                        href: undefined
+                    });
+                } else if (subSegment === "queue") {
                     items.push({
                         label: pageLabel,
                         href: `/systems/${systemId}/fraud`

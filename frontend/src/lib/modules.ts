@@ -258,17 +258,13 @@ export function getRouteLabels(): Record<string, string> {
         }
     }
 
-    // Fraud sub-pages
-    labels["overview"] = "Fraud Overview";
+    // Fraud sub-pages (only set labels that don't conflict with top-level routes)
     labels["detection"] = "Fraud Overview";
-    labels["data"] = "Fraud Data";
-    labels["training"] = "Fraud Training";
     labels["workflow"] = "Review Workflow";
     labels["operations"] = "Fraud Operations";
     labels["queue"] = "Case Queue";
     labels["cases"] = "Case Detail";
     labels["rules"] = "Detection Rules";
-
     labels["tiers"] = "Risk Tiers";
     labels["signals"] = "Signal Providers";
     labels["settings"] = "Automation Settings";
