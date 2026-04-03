@@ -581,11 +581,11 @@ export default function ExposureControl() {
                                         borderRadius: "var(--radius)",
                                         fontSize: "11px"
                                     }}
-                                    formatter={(value: any, name?: string) => {
+                                    formatter={((value: any, name?: string) => {
                                         if (name === "Bad Rate") return [`${value}%`, name];
                                         if (name === "Limit") return [`$${Number(value).toLocaleString()}`, name];
                                         return [value, name];
-                                    }}
+                                    }) as any}
                                 />
                                 <Legend
                                     wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }}

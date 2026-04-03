@@ -399,7 +399,7 @@ export default function Policy() {
                                                         <YAxis tickFormatter={(v) => `${v.toFixed(0)}%`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={38} />
                                                         <Tooltip
                                                             contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
-                                                            formatter={(value: any, name?: string) => [`${Number(value).toFixed(2)}%`, name ?? ""]}
+                                                            formatter={((value: any, name?: string) => [`${Number(value).toFixed(2)}%`, name ?? ""]) as any}
                                                             labelFormatter={(label) => `Score: ${typeof label === 'number' ? label.toFixed(3) : label}`}
                                                         />
                                                         {/* Approve shading */}
@@ -489,7 +489,7 @@ export default function Policy() {
                                                         <YAxis yAxisId="cdf" orientation="right" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={36} />
                                                         <Tooltip
                                                             contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
-                                                            formatter={(value: any, name?: string) => [name === 'Cum. % approved' ? `${Number(value).toFixed(1)}%` : Number(value).toLocaleString(), name ?? ""]}
+                                                            formatter={((value: any, name?: string) => [name === 'Cum. % approved' ? `${Number(value).toFixed(1)}%` : Number(value).toLocaleString(), name ?? ""]) as any}
                                                             labelFormatter={(label) => `Score: ${typeof label === 'number' ? label.toFixed(3) : label}`}
                                                         />
                                                         <ReferenceLine yAxisId="pop" x={currentBin?.score} stroke="hsl(var(--warn))" strokeWidth={1.5} />
@@ -1527,7 +1527,7 @@ function SegmentAnalysisPanel({
                                             <YAxis tickFormatter={(v) => `${v.toFixed(0)}%`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={38} />
                                             <Tooltip
                                                 contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
-                                                formatter={(value: any, name?: string) => [`${Number(value).toFixed(2)}%`, name ?? ""]}
+                                                formatter={((value: any, name?: string) => [`${Number(value).toFixed(2)}%`, name ?? ""]) as any}
                                                 labelFormatter={(label) => `Score: ${typeof label === 'number' ? label.toFixed(3) : label}`}
                                             />
                                             {cutoffBandIdx >= 0 && (
@@ -1613,7 +1613,7 @@ function SegmentAnalysisPanel({
                                             <YAxis yAxisId="cdf" orientation="right" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={36} />
                                             <Tooltip
                                                 contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
-                                                formatter={(value: any, name?: string) => [name === 'Cum. % approved' ? `${Number(value).toFixed(1)}%` : Number(value).toLocaleString(), name ?? ""]}
+                                                formatter={((value: any, name?: string) => [name === 'Cum. % approved' ? `${Number(value).toFixed(1)}%` : Number(value).toLocaleString(), name ?? ""]) as any}
                                                 labelFormatter={(label) => `Score: ${typeof label === 'number' ? label.toFixed(3) : label}`}
                                             />
                                             <ReferenceLine yAxisId="pop" x={currentBin?.score} stroke="hsl(var(--warn))" strokeWidth={1.5} />

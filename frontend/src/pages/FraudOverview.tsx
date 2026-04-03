@@ -148,7 +148,7 @@ export default function FraudOverview() {
                                     tickLine={false} axisLine={false} />
                                 <Tooltip
                                     contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
-                                    formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(2)}%`, "Fraud Rate"]}
+                                    formatter={((value: number | undefined) => [`${(value ?? 0).toFixed(2)}%`, "Fraud Rate"]) as any}
                                     labelFormatter={(l) => `Decile ${l}`}
                                 />
                                 <Bar dataKey="fraud_rate" fill="hsl(0,68%,52%)" fillOpacity={0.75} radius={[3, 3, 0, 0]} />
