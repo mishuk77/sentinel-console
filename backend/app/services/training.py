@@ -117,7 +117,7 @@ class TrainingService:
     def train_models(self, dataset_path: str, target_col: str, feature_cols: list[str] = None,
                      model_context: str = "credit", job_id: str = None):
         job_id = job_id or str(uuid.uuid4())
-        self._events[job_id] = []
+        self.clear_events(job_id)
 
         # ── 1. Load Data ─────────────────────────────────────
         self.emit(job_id, "load_data", "running", "Downloading dataset...")
