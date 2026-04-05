@@ -19,7 +19,7 @@ API_V1_STR = "/api/v1"
 PROJECT_NAME = "Sentinel Decision Systems"
 DEBUG = "false"
 ENV = "production"
-STORAGE_TYPE = "local"
+STORAGE_TYPE = "s3"
 
 # ============================================================
 # DO NOT PUT THESE IN THIS FILE (use Railway CLI or dashboard):
