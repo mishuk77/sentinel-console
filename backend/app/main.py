@@ -6,8 +6,6 @@ if _env != "local":
     for _var in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
                  "OMP_NUM_THREADS", "NUMEXPR_MAX_THREADS"):
         _os.environ.setdefault(_var, "4")
-    _os.environ.setdefault("LOKY_START_METHOD", "spawn")
-    _os.environ.setdefault("LOKY_MAX_CPU_COUNT", "8")
 
 from app.api.router import api_router
 from app.core.config import settings

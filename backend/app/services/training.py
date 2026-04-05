@@ -12,10 +12,6 @@ os.environ.setdefault("MKL_NUM_THREADS", _MAX_THREADS)
 os.environ.setdefault("OMP_NUM_THREADS", _MAX_THREADS)
 os.environ.setdefault("NUMEXPR_MAX_THREADS", _MAX_THREADS)
 
-if _ENV != "local":
-    os.environ.setdefault("LOKY_START_METHOD", "spawn")
-    os.environ.setdefault("LOKY_MAX_CPU_COUNT", "8")
-
 # ── Now safe to import numeric / ML libraries ───────────────────────────────
 import pandas as pd
 import numpy as np
@@ -43,9 +39,10 @@ from app.services.storage import storage
 
 logger = logging.getLogger("sentinel.training")
 
-# sklearn/XGBoost/LightGBM n_jobs: use all cores but let the thread caps
-# above prevent the thread explosion that crashes containers.
-N_JOBS = -1
+# In containers, process-based parallelism (loky/spawn/fork) all fail.
+# Use n_jobs=1 for sklearn internals — the ThreadPoolExecutor above
+# already trains all 4 models concurrently, so overall speed is fine.
+N_JOBS = 1 if _ENV != "local" else -1
 
 
 class TrainingService:
