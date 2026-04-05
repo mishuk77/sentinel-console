@@ -1,16 +1,7 @@
-# ── Thread-safety: cap native thread pools BEFORE importing numpy/OpenBLAS ──
+# ── Thread-safety: set in main.py before any imports. Re-check here as guard ──
 import os
 
 _ENV = os.getenv("ENV", "local")
-_MAX_THREADS = "4" if _ENV != "local" else str(os.cpu_count() or 4)
-
-# OpenBLAS / MKL / OpenMP each spawn threads equal to CPU count by default.
-# In containers this exhausts the thread limit and crashes the process.
-# Must be set BEFORE numpy/scipy are imported.
-os.environ.setdefault("OPENBLAS_NUM_THREADS", _MAX_THREADS)
-os.environ.setdefault("MKL_NUM_THREADS", _MAX_THREADS)
-os.environ.setdefault("OMP_NUM_THREADS", _MAX_THREADS)
-os.environ.setdefault("NUMEXPR_MAX_THREADS", _MAX_THREADS)
 
 # ── Now safe to import numeric / ML libraries ───────────────────────────────
 import pandas as pd

@@ -1,11 +1,14 @@
-# Cap native thread pools BEFORE any numpy/scipy/OpenBLAS import.
-# Without this, containers crash with "Resource temporarily unavailable".
+# Cap ALL native thread pools BEFORE any numpy/scipy/OpenBLAS import.
+# Railway containers hit thread limits even with 32 vCPUs — OpenBLAS alone
+# tries to spawn 48 threads, plus boto3/uvicorn/asyncio each add more.
+# Setting to 1 is safe: these control internal BLAS parallelism (matrix math),
+# not sklearn n_jobs (which uses separate processes/threads for model training).
 import os as _os
 _env = _os.getenv("ENV", "local")
 if _env != "local":
     for _var in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
                  "OMP_NUM_THREADS", "NUMEXPR_MAX_THREADS"):
-        _os.environ.setdefault(_var, "4")
+        _os.environ.setdefault(_var, "1")
 
 from app.api.router import api_router
 from app.core.config import settings
