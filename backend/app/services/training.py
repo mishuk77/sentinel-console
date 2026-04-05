@@ -1,3 +1,22 @@
+# ── Thread-safety: cap native thread pools BEFORE importing numpy/OpenBLAS ──
+import os
+
+_ENV = os.getenv("ENV", "local")
+_MAX_THREADS = "4" if _ENV != "local" else str(os.cpu_count() or 4)
+
+# OpenBLAS / MKL / OpenMP each spawn threads equal to CPU count by default.
+# In containers this exhausts the thread limit and crashes the process.
+# Must be set BEFORE numpy/scipy are imported.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", _MAX_THREADS)
+os.environ.setdefault("MKL_NUM_THREADS", _MAX_THREADS)
+os.environ.setdefault("OMP_NUM_THREADS", _MAX_THREADS)
+os.environ.setdefault("NUMEXPR_MAX_THREADS", _MAX_THREADS)
+
+if _ENV != "local":
+    os.environ.setdefault("LOKY_START_METHOD", "spawn")
+    os.environ.setdefault("LOKY_MAX_CPU_COUNT", "8")
+
+# ── Now safe to import numeric / ML libraries ───────────────────────────────
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score, RandomizedSearchCV
@@ -15,7 +34,6 @@ from sklearn.metrics import (
 from sklearn.calibration import calibration_curve as sklearn_calibration_curve
 from scipy.stats import uniform, randint
 import joblib
-import os
 import io
 import uuid
 import time
@@ -25,16 +43,9 @@ from app.services.storage import storage
 
 logger = logging.getLogger("sentinel.training")
 
-# In containerised environments (Railway, Docker) the default loky/fork
-# process backend often crashes ("DummyProcess has no attribute 'terminate'").
-# Fix: force loky to use "spawn" start method (safe in containers) and
-# cap CPU count. sklearn/XGBoost/LightGBM all benefit from n_jobs=-1.
-_ENV = os.getenv("ENV", "local")
-N_JOBS = -1  # use all cores in every environment
-
-if _ENV != "local":
-    os.environ.setdefault("LOKY_START_METHOD", "spawn")
-    os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(min(os.cpu_count() or 4, 8)))
+# sklearn/XGBoost/LightGBM n_jobs: use all cores but let the thread caps
+# above prevent the thread explosion that crashes containers.
+N_JOBS = -1
 
 
 class TrainingService:
