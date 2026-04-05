@@ -62,12 +62,53 @@ class DecisionService:
 
     def _score_model(self, db, model, input_data):
         """Score a single model and return (score, prepared_df)."""
-        clf = self._load_model(model)
+        import numpy as np
+        artifact = self._load_model(model)
         df = pd.DataFrame([input_data])
-        if hasattr(clf, "feature_names_in_"):
-            df = df.reindex(columns=clf.feature_names_in_, fill_value=0)
-        score = clf.predict_proba(df)[0][1]
-        return float(score), df, clf
+
+        # Raw sklearn model
+        if hasattr(artifact, "predict_proba"):
+            if hasattr(artifact, "feature_names_in_"):
+                df = df.reindex(columns=artifact.feature_names_in_, fill_value=0)
+            score = artifact.predict_proba(df)[0][1]
+            return float(score), df, artifact
+
+        if not isinstance(artifact, dict):
+            raise ValueError(f"Unsupported artifact type: {type(artifact)}")
+
+        # Individual model wrapper: {"model": clf, "scaler": scaler, "columns": [...]}
+        if "model" in artifact:
+            clf = artifact["model"]
+            columns = artifact.get("columns")
+            scaler = artifact.get("scaler")
+            if columns:
+                df = df.reindex(columns=columns, fill_value=0)
+            elif hasattr(clf, "feature_names_in_"):
+                df = df.reindex(columns=clf.feature_names_in_, fill_value=0)
+            X = scaler.transform(df) if scaler is not None else df
+            score = clf.predict_proba(X)[0][1]
+            return float(score), df, clf
+
+        # Ensemble meta: {"type": ..., "components": [...], "weights": [...]}
+        if "components" in artifact and "weights" in artifact:
+            component_names = artifact["components"]
+            weights = artifact["weights"]
+            ensemble_score = 0.0
+            last_clf = None
+            for name, w in zip(component_names, weights):
+                comp_model = db.query(MLModel).filter(
+                    MLModel.dataset_id == model.dataset_id,
+                    MLModel.algorithm == name,
+                    MLModel.artifact_path.isnot(None)
+                ).order_by(MLModel.created_at.desc()).first()
+                if not comp_model:
+                    raise ValueError(f"Ensemble component '{name}' not found")
+                comp_score, _, comp_clf = self._score_model(db, comp_model, input_data)
+                ensemble_score += w * comp_score
+                last_clf = comp_clf
+            return float(ensemble_score), df, last_clf
+
+        raise ValueError(f"Unrecognised artifact dict keys: {list(artifact.keys())}")
 
     def _determine_fraud_tier(self, fraud_score, tier_config):
         """Determine fraud tier and disposition from score + config."""
@@ -278,17 +319,9 @@ class DecisionService:
         if not model:
             raise ValueError(f"Model {model_id} not found")
             
-        clf = self._load_model(model)
-        
-        # 2. Prepare Input (MVP: same as make_decision)
-        df = pd.DataFrame([input_data])
-        if hasattr(clf, "feature_names_in_"):
-            required_cols = clf.feature_names_in_
-            df = df.reindex(columns=required_cols, fill_value=0)
-            
-        # 3. Score
-        score = clf.predict_proba(df)[0][1]
-        
+        # 2. Score using unified _score_model (handles all artifact types)
+        score, _, _ = self._score_model(db, model, input_data)
+
         return {
             "model_id": model.id,
             "score": float(score),

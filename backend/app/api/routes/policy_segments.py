@@ -115,9 +115,62 @@ def _resolve_fallback(segment: PolicySegment, all_segments: list) -> Optional[st
 
 # ─── Inference helpers ───────────────────────────────────────────────────────
 
-def _score_segment(X_encoded, y, seg_mask, clf):
+def _predict_proba_from_artifact(artifact, X_seg):
     """
-    Filter X_encoded/y to seg_mask rows, align features, score, bin into deciles.
+    Produce P(positive) scores from a loaded model artifact.
+    Handles three cases:
+      1. Raw sklearn model (has predict_proba)
+      2. Individual model dict: {"model": clf, "scaler": scaler, "columns": [...]}
+      3. Ensemble meta dict:   {"type": ..., "components": [...], "weights": [...]}
+         — for ensembles, component models must already be loaded via _load_ensemble_components.
+    """
+    import numpy as np
+
+    # Case 1: raw sklearn model
+    if hasattr(artifact, "predict_proba"):
+        return artifact.predict_proba(X_seg)[:, 1]
+
+    if not isinstance(artifact, dict):
+        raise ValueError(f"Unsupported artifact type: {type(artifact)}")
+
+    # Case 2: individual model wrapper dict
+    if "model" in artifact:
+        model = artifact["model"]
+        scaler = artifact.get("scaler")
+        columns = artifact.get("columns")
+        X_input = X_seg.copy()
+        if columns:
+            for col in columns:
+                if col not in X_input.columns:
+                    X_input[col] = 0
+            X_input = X_input[columns]
+        if scaler is not None:
+            X_input = scaler.transform(X_input)
+        return model.predict_proba(X_input)[:, 1]
+
+    # Case 3: ensemble meta — requires "loaded_components" key injected by caller
+    if "components" in artifact and "weights" in artifact:
+        loaded = artifact.get("loaded_components")
+        if not loaded:
+            raise ValueError(
+                "Ensemble artifact requires loaded component models. "
+                "Call _load_ensemble_components first."
+            )
+        weights = artifact["weights"]
+        component_names = artifact["components"]
+        scores = np.zeros(len(X_seg))
+        for name, w in zip(component_names, weights):
+            comp = loaded[name]
+            comp_scores = _predict_proba_from_artifact(comp, X_seg)
+            scores += w * comp_scores
+        return scores
+
+    raise ValueError(f"Unrecognised artifact dict keys: {list(artifact.keys())}")
+
+
+def _score_segment(X_encoded, y, seg_mask, artifact):
+    """
+    Filter X_encoded/y to seg_mask rows, score with the model artifact, bin into deciles.
     Returns list of calibration dicts or None if not enough data.
     """
     import pandas as pd
@@ -128,14 +181,7 @@ def _score_segment(X_encoded, y, seg_mask, clf):
     if n < 10:
         return None
 
-    if hasattr(clf, "feature_names_in_"):
-        expected = list(clf.feature_names_in_)
-        for col in expected:
-            if col not in X_seg.columns:
-                X_seg[col] = 0
-        X_seg = X_seg[expected]
-
-    scores = clf.predict_proba(X_seg)[:, 1]
+    scores = _predict_proba_from_artifact(artifact, X_seg)
     eval_df = pd.DataFrame({"score": scores, "target": y_seg.values})
     # Dynamic bins: ~200 obs per bin, capped 10–50, minimum 5
     n_bins = max(5, min(50, n // 200)) if n >= 100 else 5
@@ -185,6 +231,61 @@ def _find_threshold_for_bad_rate(calibration: list, target_bad_rate: float) -> O
         else:
             break  # first decile exceeding the limit — stop
     return threshold
+
+
+def _load_model_artifact(artifact_path: str, model_record, db: Session, storage):
+    """
+    Load a model artifact from storage. If it's an ensemble meta-dict, also load
+    all component model artifacts and inject them under 'loaded_components'.
+    """
+    import tempfile, os, joblib
+
+    tmp_fd, model_path = tempfile.mkstemp(suffix=".pkl")
+    os.close(tmp_fd)
+    try:
+        storage.download_file(artifact_path, model_path)
+        artifact = joblib.load(model_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load model artifact: {str(e)}")
+    finally:
+        if os.path.exists(model_path):
+            os.remove(model_path)
+
+    # If it's an ensemble meta-dict, load each component model
+    if isinstance(artifact, dict) and "components" in artifact and "weights" in artifact:
+        component_names = artifact["components"]
+        loaded = {}
+        for comp_name in component_names:
+            # Component models share the same job — find them by name + dataset
+            comp_model = db.query(MLModel).filter(
+                MLModel.dataset_id == model_record.dataset_id,
+                MLModel.algorithm == comp_name,
+                MLModel.artifact_path.isnot(None)
+            ).order_by(MLModel.created_at.desc()).first()
+
+            if not comp_model or not comp_model.artifact_path:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Ensemble component '{comp_name}' artifact not found"
+                )
+
+            tmp_fd2, comp_path = tempfile.mkstemp(suffix=".pkl")
+            os.close(tmp_fd2)
+            try:
+                storage.download_file(comp_model.artifact_path, comp_path)
+                loaded[comp_name] = joblib.load(comp_path)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to load component '{comp_name}': {str(e)}"
+                )
+            finally:
+                if os.path.exists(comp_path):
+                    os.remove(comp_path)
+
+        artifact["loaded_components"] = loaded
+
+    return artifact
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
@@ -366,19 +467,10 @@ async def get_segment_calibration(
     n = int(mask.sum())
 
     # ── Load model artifact ───────────────────────────────────────────────────
-    tmp_fd2, model_path = tempfile.mkstemp(suffix=".pkl")
-    os.close(tmp_fd2)
-    try:
-        storage.download_file(model.artifact_path, model_path)
-        clf = joblib.load(model_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load model artifact: {str(e)}")
-    finally:
-        if os.path.exists(model_path):
-            os.remove(model_path)
+    artifact = _load_model_artifact(model.artifact_path, model, db, storage)
 
     # ── Score via shared helper ───────────────────────────────────────────────
-    calibration = _score_segment(X, y, mask, clf)
+    calibration = _score_segment(X, y, mask, artifact)
     if calibration is None:
         raise HTTPException(
             status_code=400,
@@ -532,25 +624,18 @@ async def calibrate_segments(
         X_full = pd.get_dummies(X_full, dummy_na=True)
         X_full = X_full.fillna(0)
 
-        # Load model artifact once
-        tmp_fd3, model_path = tempfile.mkstemp(suffix=".pkl")
-        os.close(tmp_fd3)
-        clf = None
+        # Load model artifact once (handles individual models, ensemble meta-dicts, etc.)
         try:
-            storage.download_file(model.artifact_path, model_path)
-            clf = joblib.load(model_path)
+            artifact = _load_model_artifact(model.artifact_path, model, db, storage)
         except Exception:
-            clf = None
-        finally:
-            if os.path.exists(model_path):
-                os.remove(model_path)
+            artifact = None
 
-        if clf is not None:
+        if artifact is not None:
             for seg in segments:
                 mask = seg_masks.get(seg.id)
                 if mask is None:
                     continue
-                cal = _score_segment(X_full, y_full, mask, clf)
+                cal = _score_segment(X_full, y_full, mask, artifact)
                 if not cal:
                     continue
 

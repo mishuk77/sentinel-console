@@ -26,6 +26,60 @@ const TIER_COLORS = {
     Critical: { bg: "bg-down/5", border: "border-down/30", text: "text-down", fill: "hsl(0,68%,52%)", fillAlpha: "hsla(0,68%,52%,0.12)" },
 };
 
+const DISPOSITION_OPTIONS = [
+    { value: "none", label: "None", desc: "No verification" },
+    { value: "otp", label: "OTP", desc: "One-time passcode" },
+    { value: "kba", label: "KBA", desc: "Knowledge-based auth" },
+    { value: "document", label: "Document", desc: "Document upload" },
+    { value: "manual", label: "Manual", desc: "Manual review queue" },
+];
+
+function TierCard({ tier, icon, range, description, recommendation, method, onMethodChange, activeColor, hoverBorder, footer }: {
+    tier: string;
+    icon: React.ReactNode;
+    range: string;
+    description: string;
+    recommendation: string;
+    method: string;
+    onMethodChange: (v: string) => void;
+    activeColor: { bg: string; border: string; text: string };
+    hoverBorder: string;
+    footer?: React.ReactNode;
+}) {
+    const colors = TIER_COLORS[tier as keyof typeof TIER_COLORS];
+    return (
+        <div className={cn("panel p-4 border-2", colors.border, colors.bg)}>
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                    {icon}
+                    <span className={cn("font-bold text-sm", colors.text)}>{tier} Risk</span>
+                </div>
+                <span className="text-xs font-mono text-muted-foreground">{range}</span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">{description}</p>
+            <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Disposition</label>
+                <div className="flex flex-wrap gap-2">
+                    {DISPOSITION_OPTIONS.map(opt => (
+                        <button key={opt.value}
+                            onClick={() => onMethodChange(opt.value)}
+                            className={cn(
+                                "px-3 py-1.5 rounded text-xs font-medium border transition-colors",
+                                method === opt.value
+                                    ? cn(activeColor.bg, activeColor.border, activeColor.text)
+                                    : cn("border-border", hoverBorder)
+                            )}>
+                            {opt.label}
+                        </button>
+                    ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground italic">{recommendation}</p>
+            </div>
+            {footer}
+        </div>
+    );
+}
+
 export default function FraudTiers() {
     const { systemId } = useParams<{ systemId: string }>();
     const queryClient = useQueryClient();
@@ -57,7 +111,10 @@ export default function FraudTiers() {
     const [lowMax, setLowMax] = useState(0.3);
     const [mediumMax, setMediumMax] = useState(0.6);
     const [highMax, setHighMax] = useState(0.8);
+    const [lowMethod, setLowMethod] = useState<string>("none");
     const [mediumMethod, setMediumMethod] = useState<string>("otp");
+    const [highMethod, setHighMethod] = useState<string>("manual");
+    const [criticalMethod, setCriticalMethod] = useState<string>("manual");
     const [saveSuccess, setSaveSuccess] = useState(false);
 
     // Sync from server
@@ -66,9 +123,10 @@ export default function FraudTiers() {
             setLowMax(config.low_max);
             setMediumMax(config.medium_max);
             setHighMax(config.high_max);
-            if (config.dispositions?.medium_method) {
-                setMediumMethod(config.dispositions.medium_method);
-            }
+            if (config.dispositions?.low_method) setLowMethod(config.dispositions.low_method);
+            if (config.dispositions?.medium_method) setMediumMethod(config.dispositions.medium_method);
+            if (config.dispositions?.high_method) setHighMethod(config.dispositions.high_method);
+            if (config.dispositions?.critical_method) setCriticalMethod(config.dispositions.critical_method);
         }
     }, [config]);
 
@@ -82,10 +140,10 @@ export default function FraudTiers() {
                 auto_approve_low: true,
                 auto_block_critical: false,
                 dispositions: {
-                    low: "no_verification",
+                    low_method: lowMethod,
                     medium_method: mediumMethod,
-                    high: "manual_review",
-                    critical: "manual_review_critical_alert",
+                    high_method: highMethod,
+                    critical_method: criticalMethod,
                 }
             };
             if (config?.decision_system_id) {
@@ -285,91 +343,64 @@ export default function FraudTiers() {
                     <h3 className="panel-title">Tier Dispositions</h3>
 
                     {/* Low */}
-                    <div className={cn("panel p-4 border-2", TIER_COLORS.Low.border, TIER_COLORS.Low.bg)}>
-                        <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                                <Shield className={cn("h-4 w-4", TIER_COLORS.Low.text)} />
-                                <span className={cn("font-bold text-sm", TIER_COLORS.Low.text)}>Low Risk</span>
-                            </div>
-                            <span className="text-xs font-mono text-muted-foreground">0.00 – {lowMax.toFixed(2)}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mb-2">No additional verification required.</p>
-                        <div className="flex items-center gap-2 text-xs">
-                            <CheckCircle2 className="h-3.5 w-3.5 text-up" />
-                            <span className="font-medium">Proceed without friction</span>
-                        </div>
-                    </div>
+                    <TierCard
+                        tier="Low"
+                        icon={<Shield className={cn("h-4 w-4", TIER_COLORS.Low.text)} />}
+                        range={`0.00 – ${lowMax.toFixed(2)}`}
+                        description="Low-risk transactions proceed with minimal or no friction."
+                        recommendation="Recommended: No verification — low-risk scores rarely warrant step-up and adding friction hurts conversion."
+                        method={lowMethod}
+                        onMethodChange={setLowMethod}
+                        activeColor={{ bg: "bg-up/20", border: "border-up/40", text: "text-up" }}
+                        hoverBorder="hover:border-up/30"
+                    />
 
                     {/* Medium */}
-                    <div className={cn("panel p-4 border-2", TIER_COLORS.Medium.border, TIER_COLORS.Medium.bg)}>
-                        <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                                <Shield className={cn("h-4 w-4", TIER_COLORS.Medium.text)} />
-                                <span className={cn("font-bold text-sm", TIER_COLORS.Medium.text)}>Medium Risk</span>
-                            </div>
-                            <span className="text-xs font-mono text-muted-foreground">{lowMax.toFixed(2)} – {mediumMax.toFixed(2)}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mb-3">Proceed with additional verification / step-up.</p>
-                        <div className="space-y-2">
-                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Step-up method</label>
-                            <div className="flex gap-2">
-                                {[
-                                    { value: "otp", label: "OTP" },
-                                    { value: "kba", label: "KBA" },
-                                    { value: "document", label: "Document" },
-                                ].map(opt => (
-                                    <button key={opt.value}
-                                        onClick={() => setMediumMethod(opt.value)}
-                                        className={cn(
-                                            "px-3 py-1.5 rounded text-xs font-medium border transition-colors",
-                                            mediumMethod === opt.value
-                                                ? "bg-warn/20 border-warn/40 text-warn"
-                                                : "border-border hover:border-warn/30"
-                                        )}>
-                                        {opt.label}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
+                    <TierCard
+                        tier="Medium"
+                        icon={<Shield className={cn("h-4 w-4", TIER_COLORS.Medium.text)} />}
+                        range={`${lowMax.toFixed(2)} – ${mediumMax.toFixed(2)}`}
+                        description="Moderate suspicion — verify identity before proceeding."
+                        recommendation="Recommended: OTP — lightweight step-up that catches most account-takeover attempts without heavy friction."
+                        method={mediumMethod}
+                        onMethodChange={setMediumMethod}
+                        activeColor={{ bg: "bg-warn/20", border: "border-warn/40", text: "text-warn" }}
+                        hoverBorder="hover:border-warn/30"
+                    />
 
                     {/* High */}
-                    <div className={cn("panel p-4 border-2", TIER_COLORS.High.border, TIER_COLORS.High.bg)}>
-                        <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                                <ShieldAlert className="h-4 w-4 text-[hsl(25,95%,53%)]" />
-                                <span className="font-bold text-sm text-[hsl(25,95%,53%)]">High Risk</span>
-                            </div>
-                            <span className="text-xs font-mono text-muted-foreground">{mediumMax.toFixed(2)} – {highMax.toFixed(2)}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mb-2">Routed to manual review queue.</p>
-                        <div className="flex items-center gap-2 text-xs">
-                            <AlertTriangle className="h-3.5 w-3.5 text-[hsl(25,95%,53%)]" />
-                            <span className="font-medium">Manual review queue</span>
-                        </div>
-                    </div>
+                    <TierCard
+                        tier="High"
+                        icon={<ShieldAlert className="h-4 w-4 text-[hsl(25,95%,53%)]" />}
+                        range={`${mediumMax.toFixed(2)} – ${highMax.toFixed(2)}`}
+                        description="High suspicion — stronger verification or manual review required."
+                        recommendation="Recommended: Manual review — automated step-ups are insufficient at this risk level. Analyst review catches sophisticated fraud patterns."
+                        method={highMethod}
+                        onMethodChange={setHighMethod}
+                        activeColor={{ bg: "bg-[hsl(25,95%,53%)]/20", border: "border-[hsl(25,95%,53%)]/40", text: "text-[hsl(25,95%,53%)]" }}
+                        hoverBorder="hover:border-[hsl(25,95%,53%)]/30"
+                    />
 
                     {/* Critical */}
-                    <div className={cn("panel p-4 border-2", TIER_COLORS.Critical.border, TIER_COLORS.Critical.bg)}>
-                        <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                                <ShieldAlert className={cn("h-4 w-4", TIER_COLORS.Critical.text)} />
-                                <span className={cn("font-bold text-sm", TIER_COLORS.Critical.text)}>Critical Risk</span>
+                    <TierCard
+                        tier="Critical"
+                        icon={<ShieldAlert className={cn("h-4 w-4", TIER_COLORS.Critical.text)} />}
+                        range={`${highMax.toFixed(2)} – 1.00`}
+                        description="Highest risk — immediate escalation with critical alerting."
+                        recommendation="Recommended: Manual review — critical cases require analyst review with priority alerting. Auto-decline is not permitted under FCRA."
+                        method={criticalMethod}
+                        onMethodChange={setCriticalMethod}
+                        activeColor={{ bg: "bg-down/20", border: "border-down/40", text: "text-down" }}
+                        hoverBorder="hover:border-down/30"
+                        footer={
+                            <div className="flex items-start gap-2 p-2.5 rounded bg-info/5 border border-info/20 mt-3">
+                                <Info className="h-3.5 w-3.5 text-info shrink-0 mt-0.5" />
+                                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                    <span className="font-semibold text-info">FCRA Compliance:</span> Declining solely on fraud score violates fair lending regulations. Critical cases are routed to manual review with priority alerting — not auto-declined.
+                                </p>
                             </div>
-                            <span className="text-xs font-mono text-muted-foreground">{highMax.toFixed(2)} – 1.00</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mb-2">Manual review queue with critical alert.</p>
-                        <div className="flex items-center gap-2 text-xs mb-3">
-                            <AlertTriangle className="h-3.5 w-3.5 text-down" />
-                            <span className="font-medium">Manual review + critical alert escalation</span>
-                        </div>
-                        <div className="flex items-start gap-2 p-2.5 rounded bg-info/5 border border-info/20">
-                            <Info className="h-3.5 w-3.5 text-info shrink-0 mt-0.5" />
-                            <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                <span className="font-semibold text-info">FCRA Compliance:</span> Declining solely on fraud score violates fair lending regulations. Critical cases are routed to manual review with priority alerting — not auto-declined.
-                            </p>
-                        </div>
-                    </div>
+                        }
+                    />
 
                     {/* Example scores */}
                     <div className="panel p-4">

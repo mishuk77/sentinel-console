@@ -815,7 +815,7 @@ export default function ExposureControl() {
                             </p>
                         </div>
                         <div className="flex gap-3">
-                            <Link to={`/systems/${systemId}/fraud/settings`} className="btn-primary">
+                            <Link to={`/systems/${systemId}/fraud/overview`} className="btn-primary">
                                 Continue to Fraud Mitigation
                                 <ArrowRight className="h-5 w-5" />
                             </Link>

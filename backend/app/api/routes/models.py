@@ -19,19 +19,19 @@ def get_db():
 import logging
 logger = logging.getLogger("sentinel.training")
 
-def train_task(dataset_id: str, model_map: dict, target_col: str, feature_cols: List[str], model_context: str = "credit"):
-    logger.info(f"[TRAIN] Background task started for dataset={dataset_id}, models={model_map}")
+def train_task(dataset_id: str, model_map: dict, target_col: str, feature_cols: List[str], model_context: str = "credit", job_id: str = None):
+    logger.info(f"[TRAIN] Background task started for dataset={dataset_id}, job={job_id}")
     db = SessionLocal()
     try:
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if not dataset:
-            logger.error(f"[TRAIN] Dataset {dataset_id} not found in background task")
+            logger.error(f"[TRAIN] Dataset {dataset_id} not found")
             return
 
-        logger.info(f"[TRAIN] Dataset found: s3_key={dataset.s3_key}, target={target_col}, context={model_context}")
-
         try:
-            results = training_service.train_models(dataset.s3_key, target_col, feature_cols, model_context)
+            results = training_service.train_models(
+                dataset.s3_key, target_col, feature_cols, model_context, job_id=job_id
+            )
             logger.info(f"[TRAIN] Training complete. {len(results)} results.")
 
             for res in results:
@@ -46,6 +46,18 @@ def train_task(dataset_id: str, model_map: dict, target_col: str, feature_cols: 
                         flag_modified(model, "metrics")
                         model.artifact_path = res['artifact_path']
                         model.name = f"{algo_name}_{model_id[:8]}"
+                else:
+                    # New model not in pre-created map (e.g. ensemble, lightgbm)
+                    new_model = MLModel(
+                        dataset_id=dataset_id,
+                        decision_system_id=dataset.decision_system_id,
+                        algorithm=algo_name,
+                        status=ModelStatus.CANDIDATE,
+                        name=f"{algo_name}_{res['version_id'][:8]}",
+                        metrics=res['metrics'],
+                        artifact_path=res['artifact_path'],
+                    )
+                    db.add(new_model)
 
             db.commit()
             logger.info("[TRAIN] Models updated in DB.")
@@ -98,9 +110,9 @@ async def train_dataset(
         raise HTTPException(status_code=404, detail="Dataset not found")
         
     # Pre-create models in TRAINING state
-    algos = ["logistic_regression", "random_forest", "xgboost"]
+    algos = ["logistic_regression", "random_forest", "xgboost", "lightgbm"]
     model_map = {}
-    
+
     for algo in algos:
         new_model = MLModel(
             dataset_id=dataset_id,
@@ -110,14 +122,21 @@ async def train_dataset(
             name=f"{algo}_pending"
         )
         db.add(new_model)
-        db.flush() # get ID
+        db.flush()
         model_map[algo] = new_model.id
-        
+
     db.commit()
-        
-    print(f"[TRAIN] Queuing background task for dataset={dataset_id}, models={model_map}")
-    background_tasks.add_task(train_task, dataset_id, model_map, train_req.target_col, train_req.feature_cols, train_req.model_context or "credit")
-    return {"message": "Training started", "models": model_map}
+
+    job_id = dataset_id  # Use dataset_id as job_id for event tracking
+    logger.info(f"[TRAIN] Queuing background task for dataset={dataset_id}, models={model_map}")
+    background_tasks.add_task(train_task, dataset_id, model_map, train_req.target_col,
+                              train_req.feature_cols, train_req.model_context or "credit", job_id)
+    return {"message": "Training started", "models": model_map, "job_id": job_id}
+
+@router.get("/training-events/{job_id}")
+def get_training_events(job_id: str):
+    """Get real-time training pipeline events for the live feed."""
+    return training_service.get_events(job_id)
 
 @router.get("/")
 def list_models(
@@ -258,7 +277,21 @@ def get_risk_amount_matrix(
 
     scored_data_key = (model.metrics or {}).get("scored_data_key")
     if not scored_data_key:
-        raise HTTPException(status_code=404, detail="No scored data available. Retrain model to enable this feature.")
+        # Fallback for ensemble models: use the best component model's scored data
+        training_details = (model.metrics or {}).get("training_details", {})
+        best_params = training_details.get("best_params", {})
+        components = best_params.get("components", [])
+        if components and model.dataset_id:
+            for comp_name in components:
+                comp = db.query(MLModel).filter(
+                    MLModel.dataset_id == model.dataset_id,
+                    MLModel.algorithm == comp_name
+                ).order_by(MLModel.created_at.desc()).first()
+                if comp and (comp.metrics or {}).get("scored_data_key"):
+                    scored_data_key = comp.metrics["scored_data_key"]
+                    break
+        if not scored_data_key:
+            raise HTTPException(status_code=404, detail="No scored data available. Retrain model to enable this feature.")
 
     # Load scored data from storage
     tmp_path = None

@@ -74,6 +74,32 @@ export interface MLModel {
         feature_importance?: any[];
         feature_stats?: any[];
         data_profile?: any;
+        model_context?: string;
+        scored_data_key?: string;
+        training_details?: {
+            configs_searched?: number;
+            best_params?: Record<string, any>;
+            class_weight?: string | null;
+            scaling?: string;
+            target_encoding?: boolean;
+            outlier_handling?: string;
+            train_auc?: number | null;
+            overfit_gap?: number | null;
+            overfit_risk?: string;
+        };
+        curve_data?: {
+            roc?: { fpr: number; tpr: number }[];
+            precision_recall?: { recall: number; precision: number }[];
+            cumulative_gains?: { pct_population: number; pct_gain: number }[];
+            ks_plot?: {
+                points: { threshold_pct: number; tpr: number; fpr: number }[];
+                ks_statistic: number;
+            };
+            score_distribution?: { bin_start: number; bin_end: number; positive: number; negative: number }[];
+            calibration_curve?: { predicted: number; actual: number }[];
+            threshold_tuning?: { threshold: number; precision: number; recall: number; f1: number }[];
+            confusion_matrix?: { tn: number; fp: number; fn: number; tp: number; total: number };
+        };
     };
     created_at: string;
 }
