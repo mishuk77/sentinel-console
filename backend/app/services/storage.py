@@ -1,4 +1,5 @@
 import boto3
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config as BotoConfig
 import os
 from botocore.exceptions import ClientError
@@ -19,6 +20,8 @@ class StorageService:
                 config=BotoConfig(s3={"addressing_style": "path"}, signature_version="s3v4"),
             )
             self.bucket = settings.AWS_S3_BUCKET_NAME
+            # Single-threaded transfers to avoid spawning thread pools in containers
+            self._transfer_config = TransferConfig(use_threads=False)
             # Verify bucket is accessible (don't try to create — Railway manages it)
             try:
                 self.s3_client.head_bucket(Bucket=self.bucket)
@@ -33,7 +36,8 @@ class StorageService:
     def upload_file(self, file_obj, key: str):
         if self.mode == "s3":
             try:
-                self.s3_client.upload_fileobj(file_obj, self.bucket, key)
+                self.s3_client.upload_fileobj(file_obj, self.bucket, key,
+                                             Config=self._transfer_config)
                 return f"s3://{self.bucket}/{key}"
             except ClientError as e:
                 print(e)

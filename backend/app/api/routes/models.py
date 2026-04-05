@@ -128,9 +128,21 @@ async def train_dataset(
     db.commit()
 
     job_id = dataset_id  # Use dataset_id as job_id for event tracking
-    logger.info(f"[TRAIN] Queuing background task for dataset={dataset_id}, models={model_map}")
-    background_tasks.add_task(train_task, dataset_id, model_map, train_req.target_col,
-                              train_req.feature_cols, train_req.model_context or "credit", job_id)
+    model_context = train_req.model_context or "credit"
+
+    from app.core.config import settings
+    if settings.REDIS_URL:
+        # Dispatch to Celery worker (production — separate process, safe multiprocessing)
+        from app.tasks import celery_train_task
+        logger.info(f"[TRAIN] Dispatching Celery task for dataset={dataset_id}, models={model_map}")
+        celery_train_task.delay(dataset_id, model_map, train_req.target_col,
+                                train_req.feature_cols, model_context, job_id)
+    else:
+        # Fallback: in-process background task (local dev without Redis)
+        logger.info(f"[TRAIN] Queuing in-process task for dataset={dataset_id}, models={model_map}")
+        background_tasks.add_task(train_task, dataset_id, model_map, train_req.target_col,
+                                  train_req.feature_cols, model_context, job_id)
+
     return {"message": "Training started", "models": model_map, "job_id": job_id}
 
 @router.get("/training-events/{job_id}")

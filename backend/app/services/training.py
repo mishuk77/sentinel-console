@@ -1,5 +1,6 @@
-# ── Thread-safety: set in main.py before any imports. Re-check here as guard ──
+# ── Thread-safety: set in main.py / celery_app.py before imports ──
 import os
+import json as _json
 
 _ENV = os.getenv("ENV", "local")
 
@@ -27,32 +28,90 @@ import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.services.storage import storage
+from app.core.config import settings
 
 logger = logging.getLogger("sentinel.training")
 
-# In containers, process-based parallelism (loky/spawn/fork) all fail.
-# Use n_jobs=1 for sklearn internals — the ThreadPoolExecutor above
-# already trains all 4 models concurrently, so overall speed is fine.
-N_JOBS = 1 if _ENV != "local" else -1
+# Celery worker can safely use all cores (separate process, no thread conflicts).
+# API process in containers must use n_jobs=1 to avoid thread exhaustion.
+_IS_WORKER = os.getenv("CELERY_WORKER", "") == "1"
+N_JOBS = -1 if (_ENV == "local" or _IS_WORKER) else 1
 
 
-class TrainingService:
+# ── Event Store Abstraction ───────────────────────────────────────────────────
+
+class InMemoryEventStore:
+    """Stores training events in-memory. Used when Redis is unavailable."""
+
     def __init__(self):
-        self._events = {}  # job_id -> list of event dicts
+        self._events = {}
 
-    # ── Event System ─────────────────────────────────────────
     def emit(self, job_id: str, step: str, status: str, detail: str):
         if job_id not in self._events:
             self._events[job_id] = []
-        event = {"step": step, "status": status, "detail": detail, "ts": time.time()}
-        self._events[job_id].append(event)
-        logger.info(f"[TRAIN:{job_id[:8]}] {step} | {status} | {detail}")
+        self._events[job_id].append(
+            {"step": step, "status": status, "detail": detail, "ts": time.time()}
+        )
 
     def get_events(self, job_id: str) -> list:
         return self._events.get(job_id, [])
 
     def clear_events(self, job_id: str):
         self._events.pop(job_id, None)
+
+
+class RedisEventStore:
+    """Stores training events in Redis. Shared between API and worker processes."""
+
+    def __init__(self, redis_url: str):
+        import redis
+        self._r = redis.from_url(redis_url, decode_responses=True)
+        self._prefix = "sentinel:events:"
+        self._ttl = 3600  # events auto-expire after 1 hour
+
+    def emit(self, job_id: str, step: str, status: str, detail: str):
+        key = self._prefix + job_id
+        event = _json.dumps({"step": step, "status": status, "detail": detail, "ts": time.time()})
+        self._r.rpush(key, event)
+        self._r.expire(key, self._ttl)
+
+    def get_events(self, job_id: str) -> list:
+        key = self._prefix + job_id
+        try:
+            raw = self._r.lrange(key, 0, -1)
+            return [_json.loads(e) for e in raw]
+        except Exception:
+            return []
+
+    def clear_events(self, job_id: str):
+        self._r.delete(self._prefix + job_id)
+
+
+def _create_event_store():
+    if settings.REDIS_URL:
+        try:
+            store = RedisEventStore(settings.REDIS_URL)
+            logger.info("Using Redis event store")
+            return store
+        except Exception as e:
+            logger.warning(f"Redis connection failed, falling back to in-memory: {e}")
+    return InMemoryEventStore()
+
+
+class TrainingService:
+    def __init__(self):
+        self._store = _create_event_store()
+
+    # ── Event System ─────────────────────────────────────────
+    def emit(self, job_id: str, step: str, status: str, detail: str):
+        self._store.emit(job_id, step, status, detail)
+        logger.info(f"[TRAIN:{job_id[:8]}] {step} | {status} | {detail}")
+
+    def get_events(self, job_id: str) -> list:
+        return self._store.get_events(job_id)
+
+    def clear_events(self, job_id: str):
+        self._store.clear_events(job_id)
 
     # ── Main Training Pipeline ───────────────────────────────
     def train_models(self, dataset_path: str, target_col: str, feature_cols: list[str] = None,

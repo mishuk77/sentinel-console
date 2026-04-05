@@ -41,6 +41,9 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
+    # Redis / Celery — empty string = no Redis, fall back to in-process training
+    REDIS_URL: str = ""
+
     # S3 / Storage
     AWS_ACCESS_KEY_ID: str = "minioadmin"
     AWS_SECRET_ACCESS_KEY: str = "minioadmin"
