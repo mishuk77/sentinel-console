@@ -25,11 +25,16 @@ from app.services.storage import storage
 
 logger = logging.getLogger("sentinel.training")
 
-# In containerised environments (Railway, Docker) multiprocessing via loky/fork
-# often fails with "DummyProcess has no attribute 'terminate'" or OOM kills.
-# Cap parallelism to 1 in production; use all cores locally.
+# In containerised environments (Railway, Docker) the default loky/fork
+# process backend often crashes ("DummyProcess has no attribute 'terminate'").
+# Fix: force loky to use "spawn" start method (safe in containers) and
+# cap CPU count. sklearn/XGBoost/LightGBM all benefit from n_jobs=-1.
 _ENV = os.getenv("ENV", "local")
-N_JOBS = 1 if _ENV != "local" else -1
+N_JOBS = -1  # use all cores in every environment
+
+if _ENV != "local":
+    os.environ.setdefault("LOKY_START_METHOD", "spawn")
+    os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(min(os.cpu_count() or 4, 8)))
 
 
 class TrainingService:
