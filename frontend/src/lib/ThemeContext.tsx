@@ -21,7 +21,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         return "dark";
     });
 
-    const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("light");
+    const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("dark");
 
     // Apply theme to document
     useEffect(() => {

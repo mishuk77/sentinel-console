@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
 import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from "recharts";
-import { Sliders, Save, AlertTriangle, CheckCircle2, Shield, ShieldAlert, Info } from "lucide-react";
+import { Sliders, Save, CheckCircle2, Shield, ShieldAlert, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface FraudTierConfig {
