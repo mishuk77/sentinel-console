@@ -25,6 +25,12 @@ from app.services.storage import storage
 
 logger = logging.getLogger("sentinel.training")
 
+# In containerised environments (Railway, Docker) multiprocessing via loky/fork
+# often fails with "DummyProcess has no attribute 'terminate'" or OOM kills.
+# Cap parallelism to 1 in production; use all cores locally.
+_ENV = os.getenv("ENV", "local")
+N_JOBS = 1 if _ENV != "local" else -1
+
 
 class TrainingService:
     def __init__(self):
@@ -228,7 +234,7 @@ class TrainingService:
                 if param_dist and n_iter > 1:
                     search = RandomizedSearchCV(
                         base_clf, param_dist, n_iter=n_iter,
-                        scoring="roc_auc", cv=skf, n_jobs=-1,
+                        scoring="roc_auc", cv=skf, n_jobs=N_JOBS,
                         random_state=42, error_score="raise"
                     )
                     search.fit(X_tr, y_train)
@@ -263,7 +269,7 @@ class TrainingService:
             if best_cv_score:
                 cv_auc_mean = best_cv_score
             try:
-                raw_cv = cross_val_score(clf, X_tr, y_train, cv=skf, scoring="roc_auc", n_jobs=-1)
+                raw_cv = cross_val_score(clf, X_tr, y_train, cv=skf, scoring="roc_auc", n_jobs=N_JOBS)
                 cv_fold_scores = [round(float(s), 5) for s in raw_cv]
                 cv_auc_mean = round(float(raw_cv.mean()), 5)
                 cv_auc_std = round(float(raw_cv.std()), 5)
@@ -382,18 +388,18 @@ class TrainingService:
         cw = class_weight or None
         return [
             ("logistic_regression",
-             LogisticRegression(max_iter=1000, n_jobs=-1, class_weight=cw),
+             LogisticRegression(max_iter=1000, n_jobs=N_JOBS, class_weight=cw),
              {"C": uniform(0.01, 10), "solver": ["lbfgs", "saga"]},
              20, True),
 
             ("random_forest",
-             RandomForestClassifier(n_jobs=-1, class_weight=cw),
+             RandomForestClassifier(n_jobs=N_JOBS, class_weight=cw),
              {"n_estimators": randint(50, 300), "max_depth": randint(5, 20),
               "min_samples_split": randint(2, 20), "min_samples_leaf": randint(1, 10)},
              25, False),
 
             ("xgboost",
-             xgb.XGBClassifier(eval_metric="logloss", n_jobs=-1, tree_method="hist",
+             xgb.XGBClassifier(eval_metric="logloss", n_jobs=N_JOBS, tree_method="hist",
                                scale_pos_weight=(1.0 / 0.1 if cw else 1.0)),
              {"max_depth": randint(3, 10), "learning_rate": uniform(0.01, 0.3),
               "n_estimators": randint(50, 300), "subsample": uniform(0.6, 0.4),
@@ -402,7 +408,7 @@ class TrainingService:
              30, False),
 
             ("lightgbm",
-             lgb.LGBMClassifier(n_jobs=-1, verbose=-1,
+             lgb.LGBMClassifier(n_jobs=N_JOBS, verbose=-1,
                                 is_unbalance=True if cw else False),
              {"num_leaves": randint(20, 100), "max_depth": randint(3, 12),
               "learning_rate": uniform(0.01, 0.3), "n_estimators": randint(50, 300),
