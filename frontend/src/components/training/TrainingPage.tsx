@@ -48,7 +48,7 @@ export interface TrainingPageConfig {
     emptyLinkText: string;
 }
 
-type TrainingState = 'IDLE' | 'STARTING' | 'TRAINING' | 'COMPLETED';
+type TrainingState = 'IDLE' | 'STARTING' | 'TRAINING' | 'COMPLETED' | 'FAILED';
 
 export default function TrainingPage({ config }: { config: TrainingPageConfig }) {
     const { systemId } = useParams<{ systemId: string }>();
@@ -116,7 +116,7 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
 
     // Elapsed time effect
     useEffect(() => {
-        if (trainingState === 'STARTING' || trainingState === 'TRAINING' || trainingState === 'COMPLETED') {
+        if (trainingState === 'STARTING' || trainingState === 'TRAINING' || trainingState === 'COMPLETED' || trainingState === 'FAILED') {
             if (!startTimeRef.current) {
                 startTimeRef.current = Date.now();
             }
@@ -124,7 +124,7 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
                 if (startTimeRef.current) {
                     const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
                     setElapsedSeconds(elapsed);
-                    if (trainingState === 'COMPLETED' && completedAtRef.current !== null && elapsed >= completedAtRef.current + 5) {
+                    if (trainingState === 'FAILED' || (trainingState === 'COMPLETED' && completedAtRef.current !== null && elapsed >= completedAtRef.current + 5)) {
                         clearInterval(timerRef.current!);
                         timerRef.current = null;
                     }
@@ -161,14 +161,19 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
                 } else {
                     completedAtRef.current = startTimeRef.current
                         ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0;
-                    setTrainingState('COMPLETED');
+                    // Check if all new models failed
+                    const newModels = models.slice(initialCount);
+                    const allFailed = newModels.length > 0 && newModels.every(m => m.status === "FAILED");
+                    setTrainingState(allFailed ? 'FAILED' : 'COMPLETED');
                 }
             }
         } else if (trainingState === 'TRAINING') {
             if (!hasTrainingModels) {
                 completedAtRef.current = startTimeRef.current
                     ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0;
-                setTrainingState('COMPLETED');
+                const newModels = models.slice(initialCount);
+                const allFailed = newModels.length > 0 && newModels.every(m => m.status === "FAILED");
+                setTrainingState(allFailed ? 'FAILED' : 'COMPLETED');
             }
         }
     }, [models, trainingState]);
@@ -182,8 +187,8 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
             setTrainingEvents(res.data || []);
             return res.data;
         },
-        enabled: !!jobId && (trainingState === 'STARTING' || trainingState === 'TRAINING'),
-        refetchInterval: 1000,
+        enabled: !!jobId && (trainingState === 'STARTING' || trainingState === 'TRAINING' || trainingState === 'FAILED'),
+        refetchInterval: trainingState === 'FAILED' ? 3000 : 1000,
     });
 
     // Start Training Mutation
@@ -292,8 +297,9 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
     };
 
     const trainingStep = getTrainingStep();
+    const isFailed = trainingState === 'FAILED';
     const isTrainingActive = trainingState === 'STARTING' || trainingState === 'TRAINING'
-        || (trainingState === 'COMPLETED' && trainingStep < 4);
+        || (trainingState === 'COMPLETED' && trainingStep < 4) || isFailed;
     const isCompleted = trainingState === 'COMPLETED' && trainingStep >= 4;
 
     const targetHints = config.targetHints || [];
@@ -309,16 +315,25 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
 
             {/* ── Training Progress Card ──────────────────────── */}
             {isTrainingActive && (
-                <div className="panel border-info/30 bg-info/5 animate-in fade-in slide-in-from-top-4">
+                <div className={cn(
+                    "panel animate-in fade-in slide-in-from-top-4",
+                    isFailed ? "border-down/30 bg-down/5" : "border-info/30 bg-info/5"
+                )}>
                     <div className="flex items-start justify-between mb-6 p-5 pb-0">
                         <div className="flex items-center gap-4">
-                            <div className="bg-info/10 p-3 rounded-full">
-                                <Cpu className="h-6 w-6 text-info animate-pulse" />
+                            <div className={cn("p-3 rounded-full", isFailed ? "bg-down/10" : "bg-info/10")}>
+                                {isFailed
+                                    ? <AlertTriangle className="h-6 w-6 text-down" />
+                                    : <Cpu className="h-6 w-6 text-info animate-pulse" />}
                             </div>
                             <div>
-                                <h3 className="text-lg font-bold">Training in Progress</h3>
-                                <p className="text-info text-sm">
-                                    Sentinel is training 5 models &mdash; hyperparameter tuning, feature engineering &amp; ensemble
+                                <h3 className="text-lg font-bold">
+                                    {isFailed ? "Training Failed" : "Training in Progress"}
+                                </h3>
+                                <p className={cn("text-sm", isFailed ? "text-down" : "text-info")}>
+                                    {isFailed
+                                        ? "All models failed. Review the pipeline log below for details."
+                                        : "Sentinel is training 5 models \u2014 hyperparameter tuning, feature engineering & ensemble"}
                                 </p>
                             </div>
                         </div>
@@ -388,8 +403,13 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
                     {/* Live Training Event Feed */}
                     {trainingEvents.length > 0 && (
                         <div className="mx-5 mt-4 mb-5">
-                            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-2">Live Pipeline Feed</p>
-                            <div className="bg-black/20 rounded-lg border border-border/50 max-h-[180px] overflow-y-auto font-mono text-[11px] p-3 space-y-1">
+                            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-2">
+                                {isFailed ? "Pipeline Log" : "Live Pipeline Feed"}
+                            </p>
+                            <div className={cn(
+                                "bg-black/20 rounded-lg border border-border/50 overflow-y-auto font-mono text-[11px] p-3 space-y-1",
+                                isFailed ? "max-h-[400px]" : "max-h-[180px]"
+                            )}>
                                 {trainingEvents.map((evt, i) => (
                                     <div key={i} className="flex items-start gap-2">
                                         <span className={cn(
@@ -450,6 +470,7 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
                     </button>
                 </div>
             )}
+
 
             {/* ── Wizard Card ────────────────────────────────── */}
             {trainingState === 'IDLE' && (
