@@ -32,10 +32,9 @@ from app.core.config import settings
 
 logger = logging.getLogger("sentinel.training")
 
-# Celery worker can safely use all cores (separate process, no thread conflicts).
-# API process in containers must use n_jobs=1 to avoid thread exhaustion.
-_IS_WORKER = os.getenv("CELERY_WORKER", "") == "1"
-N_JOBS = -1 if (_ENV == "local" or _IS_WORKER) else 1
+# Railway's prefork Celery worker cannot use loky parallel loops (fork-in-fork).
+# Use n_jobs=-1 only for local dev where there are no container restrictions.
+N_JOBS = -1 if _ENV == "local" else 1
 
 
 # ── Event Store Abstraction ───────────────────────────────────────────────────

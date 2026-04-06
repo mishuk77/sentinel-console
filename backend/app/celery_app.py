@@ -23,6 +23,7 @@ celery_app.conf.update(
     result_serializer="json",
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    worker_max_tasks_per_child=1,
     task_track_started=True,
     task_time_limit=3600,
     task_soft_time_limit=3000,
