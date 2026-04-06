@@ -452,13 +452,13 @@ class TrainingService:
             ("logistic_regression",
              LogisticRegression(max_iter=1000, n_jobs=N_JOBS, class_weight=cw),
              {"C": uniform(0.01, 10), "solver": ["lbfgs", "saga"]},
-             20, True),
+             10, True),
 
             ("random_forest",
              RandomForestClassifier(n_jobs=N_JOBS, class_weight=cw),
              {"n_estimators": randint(50, 300), "max_depth": randint(5, 20),
               "min_samples_split": randint(2, 20), "min_samples_leaf": randint(1, 10)},
-             25, False),
+             12, False),
 
             ("xgboost",
              xgb.XGBClassifier(eval_metric="logloss", n_jobs=N_JOBS, tree_method="hist",
@@ -467,7 +467,7 @@ class TrainingService:
               "n_estimators": randint(50, 300), "subsample": uniform(0.6, 0.4),
               "colsample_bytree": uniform(0.6, 0.4), "reg_alpha": uniform(0, 1),
               "reg_lambda": uniform(0.5, 2)},
-             30, False),
+             15, False),
 
             ("lightgbm",
              lgb.LGBMClassifier(n_jobs=N_JOBS, verbose=-1,
@@ -476,7 +476,7 @@ class TrainingService:
               "learning_rate": uniform(0.01, 0.3), "n_estimators": randint(50, 300),
               "subsample": uniform(0.6, 0.4), "colsample_bytree": uniform(0.6, 0.4),
               "reg_alpha": uniform(0, 1), "reg_lambda": uniform(0, 1)},
-             30, False),
+             15, False),
         ]
 
     # ── Ensemble Builder ─────────────────────────────────────
