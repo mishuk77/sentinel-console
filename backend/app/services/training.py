@@ -119,7 +119,7 @@ class TrainingService:
         self.clear_events(job_id)
 
         # ── 1. Load Data ─────────────────────────────────────
-        self.emit(job_id, "load_data", "running", "Downloading dataset...")
+        self.emit(job_id, "load_data", "running", f"Downloading dataset from {storage.mode.upper()} storage...")
         local_csv_path = f"temp_dataset_{job_id[:8]}.csv"
         storage.download_file(dataset_path, local_csv_path)
         df = pd.read_csv(local_csv_path)
@@ -141,8 +141,9 @@ class TrainingService:
 
         y = df[target_col].copy()
         total_rows_original = len(df)
+        mem_mb = round(df.memory_usage(deep=True).sum() / 1024 / 1024, 1)
         self.emit(job_id, "load_data", "done",
-                  f"{total_rows_original:,} rows × {len(X_orig.columns)} features loaded")
+                  f"{total_rows_original:,} rows × {len(X_orig.columns)} features loaded ({mem_mb} MB in memory)")
 
         # ── 2. Data Profiling ────────────────────────────────
         self.emit(job_id, "data_profile", "running", "Profiling dataset characteristics...")
@@ -168,6 +169,12 @@ class TrainingService:
                   f"{len(numeric_cols)} numeric, {len(cat_cols)} categorical features · "
                   f"{missing_pct}% missing · {minority_rate:.1%} minority class rate" if minority_rate else
                   f"{len(numeric_cols)} numeric, {len(cat_cols)} categorical · {missing_pct}% missing")
+        # Detailed column breakdown
+        col_types = X_orig.dtypes.value_counts()
+        dtype_summary = ", ".join(f"{count} {dtype}" for dtype, count in col_types.items())
+        self.emit(job_id, "data_dtypes", "done",
+                  f"Column dtypes: {dtype_summary} · "
+                  f"Target '{target_col}' has {y.nunique()} classes")
 
         # ── 3. Class Imbalance Detection ─────────────────────
         class_weight_setting = None
@@ -183,11 +190,16 @@ class TrainingService:
         eng_steps = []
 
         # Drop high-cardinality categoricals
+        dropped_hi_card = []
         for col in cat_cols[:]:
             if X_orig[col].nunique() > 50:
                 X_orig = X_orig.drop(columns=[col])
                 cat_cols.remove(col)
-                eng_steps.append(f"Dropped high-cardinality: {col} ({X_orig[col].nunique() if col in X_orig.columns else '>50'} unique)")
+                dropped_hi_card.append(col)
+                eng_steps.append(f"Dropped high-cardinality: {col}")
+        if dropped_hi_card:
+            self.emit(job_id, "feature_eng_card", "done",
+                      f"Dropped {len(dropped_hi_card)} high-cardinality categoricals (>50 unique): {', '.join(dropped_hi_card)}")
 
         # Target encoding for remaining categoricals
         cat_cols_current = X_orig.select_dtypes(include=["object", "string", "category"]).columns.tolist()
@@ -202,9 +214,13 @@ class TrainingService:
                 X_orig[col] = X_orig[col].map(smooth_mean).fillna(global_mean)
                 target_encoded_cols.append(col)
             eng_steps.append(f"Target encoded {len(target_encoded_cols)} categorical features with Bayesian smoothing")
+            self.emit(job_id, "feature_eng_encode", "done",
+                      f"Bayesian target encoding applied to {len(target_encoded_cols)} categoricals: "
+                      f"{', '.join(target_encoded_cols)} (smoothing factor={smoothing}, global mean={global_mean:.4f})")
 
         # Outlier handling — winsorize numeric features at 1st/99th percentile
         outlier_count = 0
+        cols_with_outliers = 0
         for col in X_orig.select_dtypes(include=["number"]).columns:
             col_data = X_orig[col].dropna()
             if len(col_data) < 10:
@@ -216,8 +232,15 @@ class TrainingService:
             if n_outliers > 0:
                 X_orig[col] = X_orig[col].clip(lower=p01, upper=p99)
                 outlier_count += n_outliers
+                cols_with_outliers += 1
         if outlier_count > 0:
             eng_steps.append(f"Winsorized {outlier_count} outlier values at 1st/99th percentiles")
+            self.emit(job_id, "feature_eng_outlier", "done",
+                      f"Winsorized {outlier_count:,} outlier values across {cols_with_outliers} features "
+                      f"(clipped at 1st/99th percentile boundaries)")
+        else:
+            self.emit(job_id, "feature_eng_outlier", "done",
+                      "No outliers detected beyond 1st/99th percentile thresholds")
 
         # Fill missing values — median for numeric
         missing_before = int(X_orig.isnull().sum().sum())
@@ -229,22 +252,30 @@ class TrainingService:
             if remaining_missing > 0:
                 X_orig = X_orig.fillna(0)
             eng_steps.append(f"Imputed {missing_before} missing values (median for numeric)")
+            self.emit(job_id, "feature_eng_impute", "done",
+                      f"Imputed {missing_before:,} missing values using median strategy")
 
         # One-hot encode any remaining object columns (shouldn't be many after target encoding)
         remaining_obj = X_orig.select_dtypes(include=["object", "string"]).columns.tolist()
         if remaining_obj:
             X_orig = pd.get_dummies(X_orig, columns=remaining_obj, dummy_na=True)
             eng_steps.append(f"One-hot encoded {len(remaining_obj)} remaining categorical features")
+            self.emit(job_id, "feature_eng_onehot", "done",
+                      f"One-hot encoded {len(remaining_obj)} remaining categoricals → {len(X_orig.columns)} total features")
 
         self.emit(job_id, "feature_eng", "done",
-                  " · ".join(eng_steps) if eng_steps else "No feature engineering needed")
+                  f"Feature engineering complete — {len(X_orig.columns)} final features")
 
         # ── 5. Feature Scaling ───────────────────────────────
-        self.emit(job_id, "scaling", "done", "StandardScaler applied for linear models")
+        self.emit(job_id, "scaling", "running", "Fitting StandardScaler for feature normalization...")
 
         # Compute feature stats before scaling
         feature_stats = self._compute_feature_stats(X_orig, y)
         feature_count = len(X_orig.columns)
+
+        self.emit(job_id, "scaling", "done",
+                  f"StandardScaler fitted on {feature_count} features — "
+                  f"μ→0, σ→1 normalization (required for Logistic Regression, improves convergence for all)")
 
         # ── 6. Sampling Cap ──────────────────────────────────
         TRAIN_CAP = 150_000
@@ -270,28 +301,39 @@ class TrainingService:
 
         train_rows = len(X_train)
         test_rows = len(X_test)
+        train_pos_rate = round(float(y_train.mean()), 4)
+        test_pos_rate = round(float(y_test.mean()), 4)
         self.emit(job_id, "split", "done",
-                  f"Train: {train_rows:,} rows · Test: {test_rows:,} rows (80/20 stratified split)")
+                  f"Stratified split → Train: {train_rows:,} rows ({train_pos_rate:.1%} positive) · "
+                  f"Test: {test_rows:,} rows ({test_pos_rate:.1%} positive) — class ratio preserved")
 
         # ── 8. Hyperparameter Tuning + Training ──────────────
-        self.emit(job_id, "tuning", "running", "Configuring hyperparameter search spaces...")
-
         skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
 
         # Define candidates with parameter search spaces
         candidates = self._build_candidates(class_weight_setting)
+        total_configs = sum(n_iter for _, _, _, n_iter, _ in candidates)
+        total_fits = total_configs * 3  # 3 CV folds each
+        self.emit(job_id, "tuning", "running",
+                  f"Hyperparameter search: {len(candidates)} algorithms × RandomizedSearchCV · "
+                  f"{total_configs} total configurations × 3-fold stratified CV = {total_fits} model fits")
 
         results = []
         trained_models = {}  # name -> (clf, preds, auc) for ensemble
 
-        for name, base_clf, param_dist, n_iter, use_scaled in candidates:
+        for idx, (name, base_clf, param_dist, n_iter, use_scaled) in enumerate(candidates, 1):
             version_id = str(uuid.uuid4())
             X_tr = X_train_scaled if use_scaled else X_train
             X_te = X_test_scaled if use_scaled else X_test
 
+            # Describe the search space for this model
+            param_names = list(param_dist.keys()) if param_dist else []
             self.emit(job_id, f"train_{name}", "running",
-                      f"Training {self._display_name(name)} — searching {n_iter} hyperparameter configurations...")
+                      f"[{idx}/{len(candidates)}] Training {self._display_name(name)} — "
+                      f"RandomizedSearchCV over {n_iter} configs × 3 folds = {n_iter * 3} fits · "
+                      f"Tuning: {', '.join(param_names)}")
 
+            t0 = time.time()
             try:
                 if param_dist and n_iter > 1:
                     search = RandomizedSearchCV(
@@ -304,27 +346,40 @@ class TrainingService:
                     best_params = search.best_params_
                     configs_searched = n_iter
                     best_cv_score = round(float(search.best_score_), 5)
+                    elapsed = round(time.time() - t0, 1)
+                    # Format best params compactly
+                    param_str = ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}"
+                                         for k, v in best_params.items())
                     self.emit(job_id, f"train_{name}", "done",
-                              f"{self._display_name(name)} — best AUC: {best_cv_score:.4f} "
-                              f"(searched {configs_searched} configs)")
+                              f"{self._display_name(name)} — best CV AUC: {best_cv_score:.4f} "
+                              f"in {elapsed}s ({configs_searched} configs) · Best: {{{param_str}}}")
                 else:
                     clf = base_clf
                     clf.fit(X_tr, y_train)
                     best_params = {}
                     configs_searched = 1
                     best_cv_score = None
+                    elapsed = round(time.time() - t0, 1)
                     self.emit(job_id, f"train_{name}", "done",
-                              f"{self._display_name(name)} trained with default parameters")
+                              f"{self._display_name(name)} trained with defaults in {elapsed}s")
 
             except Exception as e:
+                elapsed = round(time.time() - t0, 1)
                 logger.error(f"Training {name} failed: {e}")
-                self.emit(job_id, f"train_{name}", "error", f"{self._display_name(name)} failed: {str(e)[:100]}")
+                self.emit(job_id, f"train_{name}", "error",
+                          f"{self._display_name(name)} failed after {elapsed}s: {str(e)[:100]}")
                 continue
 
             # Hold-out evaluation
             preds = clf.predict_proba(X_te)[:, 1]
             auc = float(roc_auc_score(y_test, preds))
             trained_models[name] = (clf, preds, auc, use_scaled)
+
+            # Emit holdout vs CV comparison (shows generalization)
+            cv_vs_holdout = f"CV: {best_cv_score:.4f}" if best_cv_score else "N/A"
+            self.emit(job_id, f"eval_{name}", "done",
+                      f"{self._display_name(name)} holdout AUC: {auc:.4f} · {cv_vs_holdout} — "
+                      f"{'good generalization' if best_cv_score and abs(auc - best_cv_score) < 0.02 else 'check overfitting' if best_cv_score and auc < best_cv_score - 0.02 else 'validated'}")
 
             # Cross-validation scores
             cv_fold_scores, cv_auc_mean, cv_auc_std = [], None, None
@@ -353,9 +408,13 @@ class TrainingService:
             # Save artifact
             model_buffer = io.BytesIO()
             joblib.dump({"model": clf, "scaler": scaler, "columns": list(X.columns)}, model_buffer)
+            artifact_bytes = model_buffer.tell()
             model_buffer.seek(0)
             artifact_key = f"models/{name}_{version_id}.pkl"
             storage.upload_file(model_buffer, artifact_key)
+            self.emit(job_id, f"artifact_{name}", "done",
+                      f"Serialized {self._display_name(name)} → {artifact_key} "
+                      f"({round(artifact_bytes / 1024, 1)} KB)")
 
             # Save scored dataset
             scored_data_key = self._save_scored_data(name, version_id, clf,
@@ -366,6 +425,10 @@ class TrainingService:
             train_auc = float(roc_auc_score(y_train, train_preds))
             overfit_gap = round(train_auc - auc, 4)
             overfit_risk = "High" if overfit_gap > 0.05 else ("Moderate" if overfit_gap > 0.02 else "Low")
+            self.emit(job_id, f"overfit_{name}", "done" if overfit_risk == "Low" else "warn",
+                      f"{self._display_name(name)} overfit check — "
+                      f"Train AUC: {train_auc:.4f} vs Test AUC: {auc:.4f} · "
+                      f"Gap: {overfit_gap:.4f} · Risk: {overfit_risk}")
 
             results.append({
                 "name": name,
@@ -433,10 +496,18 @@ class TrainingService:
 
         # ── 10. Final Summary ────────────────────────────────
         if results:
-            best = max(results, key=lambda r: r["metrics"]["auc"])
+            sorted_results = sorted(results, key=lambda r: r["metrics"]["auc"], reverse=True)
+            best = sorted_results[0]
+            # Emit leaderboard
+            leaderboard = " → ".join(
+                f"{self._display_name(r['name'])} ({r['metrics']['auc']:.4f})"
+                for r in sorted_results
+            )
+            self.emit(job_id, "leaderboard", "done",
+                      f"Model ranking by AUC: {leaderboard}")
             self.emit(job_id, "complete", "done",
-                      f"Training complete — {len(results)} models trained · "
-                      f"Best: {self._display_name(best['name'])} (AUC: {best['metrics']['auc']:.4f})")
+                      f"Pipeline complete — {len(results)} models trained · "
+                      f"Champion: {self._display_name(best['name'])} (AUC: {best['metrics']['auc']:.4f})")
 
         # Cleanup
         if os.path.exists(local_csv_path):

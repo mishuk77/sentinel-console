@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dataset, MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Play, Loader2, Trophy, ArrowRight, FileText, CheckCircle2, Clock, Cpu, X, AlertTriangle, BarChart2 } from "lucide-react";
+import { Play, Loader2, Trophy, ArrowRight, FileText, CheckCircle2, Clock, Cpu, X, AlertTriangle, BarChart2, ChevronDown, ChevronRight, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Configuration type ─────────────────────────────────────
@@ -71,6 +71,9 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
     const [trainingState, setTrainingState] = useState<TrainingState>('IDLE');
     const [jobId, setJobId] = useState<string | null>(null);
     const [trainingEvents, setTrainingEvents] = useState<Array<{ step: string; status: string; detail: string; ts: number }>>([]);
+
+    // Pipeline log visibility
+    const [logExpanded, setLogExpanded] = useState(true);
 
     // Elapsed time tracking
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -222,7 +225,7 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
         completedAtRef.current = null;
         setElapsedSeconds(0);
         setJobId(null);
-        setTrainingEvents([]);
+        // Don't clear trainingEvents — keep them for the persistent log
     };
 
     // Fetch data quality profile
@@ -400,11 +403,8 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
                         </div>
                     </div>
 
-                    {/* Live Training Event Feed — always visible during training */}
+                    {/* Inline Pipeline Feed (during active training) */}
                     <div className="mx-5 mt-4 mb-5">
-                        <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-2">
-                            {isFailed ? "Pipeline Log" : "Live Pipeline Feed"}
-                        </p>
                         <div className={cn(
                             "bg-black/20 rounded-lg border border-border/50 overflow-y-auto font-mono text-[11px] p-3 space-y-1",
                             isFailed ? "max-h-[400px]" : "max-h-[280px]"
@@ -476,6 +476,58 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
                 </div>
             )}
 
+
+            {/* ── Collapsible Pipeline Log (persists after training) ── */}
+            {trainingEvents.length > 0 && !isTrainingActive && (
+                <div className="panel">
+                    <button
+                        onClick={() => setLogExpanded(prev => !prev)}
+                        className="w-full px-5 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+                    >
+                        <div className="flex items-center gap-2.5">
+                            <Terminal className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-semibold">Training Pipeline Log</span>
+                            <span className="text-xs text-muted-foreground">
+                                {trainingEvents.length} events
+                                {completedAtRef.current != null && completedAtRef.current > 0
+                                    ? ` · ${formatTime(completedAtRef.current)}` : ''}
+                            </span>
+                        </div>
+                        {logExpanded
+                            ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    </button>
+                    {logExpanded && (
+                        <div className="px-5 pb-4">
+                            <div className="bg-black/20 rounded-lg border border-border/50 overflow-y-auto font-mono text-[11px] p-3 space-y-1 max-h-[500px]">
+                                {trainingEvents.map((evt, i) => (
+                                    <div key={i} className="flex items-start gap-2">
+                                        <span className={cn(
+                                            "shrink-0 mt-0.5 h-1.5 w-1.5 rounded-full",
+                                            evt.status === "done" ? "bg-up" :
+                                            evt.status === "warn" ? "bg-warn" :
+                                            evt.status === "error" ? "bg-down" :
+                                            "bg-info"
+                                        )} />
+                                        <span className="text-muted-foreground shrink-0">
+                                            {new Date(evt.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                        </span>
+                                        <span className={cn(
+                                            evt.status === "error" ? "text-down" :
+                                            evt.status === "warn" ? "text-warn" :
+                                            evt.status === "done" ? "text-up" :
+                                            "text-foreground"
+                                        )}>
+                                            <span className="font-semibold">{evt.step}</span>
+                                            {evt.detail && <span className="text-muted-foreground"> — {evt.detail}</span>}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* ── Wizard Card ────────────────────────────────── */}
             {trainingState === 'IDLE' && (

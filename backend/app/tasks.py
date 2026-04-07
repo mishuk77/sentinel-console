@@ -24,23 +24,15 @@ def celery_train_task(self, dataset_id: str, model_map: dict, target_col: str,
     """Run ML training pipeline in the Celery worker process."""
     emit = training_service.emit
 
-    # ── Diagnostic: worker environment ──────────────────────
+    # ── Worker dispatch ──────────────────────────────────────
     training_service.clear_events(job_id)
-    emit(job_id, "worker_init", "running",
-         f"Celery worker started · ENV={os.getenv('ENV', 'unknown')} · "
-         f"CELERY_WORKER={os.getenv('CELERY_WORKER', 'unset')} · "
-         f"PID={os.getpid()}")
-
-    emit(job_id, "worker_storage", "running",
-         f"Storage mode: {storage.mode} · "
-         f"Bucket: {getattr(storage, 'bucket', 'N/A')} · "
-         f"Endpoint: {settings.AWS_ENDPOINT_URL if storage.mode == 's3' else 'local'} · "
-         f"STORAGE_TYPE env: {os.getenv('STORAGE_TYPE', 'unset')}")
-
-    emit(job_id, "worker_config", "running",
-         f"REDIS_URL set: {bool(settings.REDIS_URL)} · "
-         f"DATABASE_URL set: {bool(settings.DATABASE_URL)} · "
-         f"dataset_id: {dataset_id} · job_id: {job_id}")
+    import platform
+    emit(job_id, "worker_dispatch", "running",
+         f"Task dispatched to Celery worker · PID {os.getpid()} · "
+         f"Python {platform.python_version()} · {platform.machine()}")
+    emit(job_id, "worker_env", "running",
+         f"Storage: {storage.mode.upper()} · Redis: {'connected' if settings.REDIS_URL else 'N/A'} · "
+         f"ENV: {os.getenv('ENV', 'local')}")
 
     logger.info(f"[CELERY] Training started for dataset={dataset_id}, job={job_id}")
 
