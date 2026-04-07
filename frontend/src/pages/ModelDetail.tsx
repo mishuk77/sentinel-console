@@ -380,7 +380,7 @@ export default function ModelDetail() {
                 {/* Lift / Decile Chart */}
                 <div className="lg:col-span-2 panel p-5">
                     <div className="flex items-start justify-between mb-1">
-                        <h3 className="text-sm font-semibold">Risk by Decile</h3>
+                        <h3 className="text-sm font-semibold">Observed Bad Rate by Score Bin</h3>
                         <span className="badge badge-muted text-xs">Out-of-sample (holdout)</span>
                     </div>
                     <p className="text-xs text-muted-foreground mb-1">

@@ -316,7 +316,7 @@ export default function Models() {
                                         <td className="capitalize text-xs">{m.algorithm?.replace("_", " ")}</td>
                                         <td className="font-bold num">
                                             {m.metrics?.auc ? (
-                                                <span className={m.metrics.auc > 0.8 ? "text-up" : "text-warn"}>
+                                                <span className={m.metrics.auc > 0.75 ? "text-up" : "text-warn"}>
                                                     {(m.metrics.auc * 100).toFixed(2)}%
                                                 </span>
                                             ) : "—"}

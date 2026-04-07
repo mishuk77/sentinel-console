@@ -68,9 +68,22 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
     const [profileError, setProfileError] = useState<string | null>(null);
 
     // Explicit State Machine for Training Process
+    const storageKey = `sentinel-training-log-${systemId}-${config.modelContext}`;
     const [trainingState, setTrainingState] = useState<TrainingState>('IDLE');
     const [jobId, setJobId] = useState<string | null>(null);
-    const [trainingEvents, setTrainingEvents] = useState<Array<{ step: string; status: string; detail: string; ts: number }>>([]);
+    const [trainingEvents, setTrainingEvents] = useState<Array<{ step: string; status: string; detail: string; ts: number }>>(() => {
+        try {
+            const saved = sessionStorage.getItem(storageKey);
+            return saved ? JSON.parse(saved) : [];
+        } catch { return []; }
+    });
+
+    // Persist training events to sessionStorage
+    useEffect(() => {
+        if (trainingEvents.length > 0) {
+            try { sessionStorage.setItem(storageKey, JSON.stringify(trainingEvents)); } catch {}
+        }
+    }, [trainingEvents, storageKey]);
 
     // Pipeline log visibility
     const [logExpanded, setLogExpanded] = useState(true);

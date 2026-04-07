@@ -458,70 +458,10 @@ export default function ExposureControl() {
                         )}
                     </div>
 
-                    {/* Impact Simulation */}
-                    {impactMetrics && (
-                        <div className="panel p-5">
-                            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                                <TrendingDown className="h-4 w-4 text-up" />
-                                Impact Simulation
-                            </h3>
-                            <p className="text-xs text-muted-foreground mb-4">
-                                Baseline is the mean loan amount from training data (${Math.round(amtMean).toLocaleString()}).
-                                Impact = expected loss reduction assuming constant approval volume.
-                            </p>
-
-                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                <div className="p-4 bg-muted/20 rounded">
-                                    <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Current (No Limits)</p>
-                                    <p className="text-lg font-bold">${Math.round(impactMetrics.currentAvgAmount).toLocaleString()}</p>
-                                    <p className="text-xs text-muted-foreground">avg. amount</p>
-                                    <p className="text-down font-semibold mt-2 text-sm">
-                                        ${impactMetrics.currentEL.toFixed(0)} exp. loss/app
-                                    </p>
-                                </div>
-                                <div className="p-4 bg-up/5 border border-up/20 rounded">
-                                    <p className="text-xs text-muted-foreground uppercase font-medium mb-1">With Ladder</p>
-                                    <p className="text-lg font-bold">${Math.round(impactMetrics.proposedAvgAmount).toLocaleString()}</p>
-                                    <p className="text-xs text-muted-foreground">avg. amount</p>
-                                    <p className="text-up font-semibold mt-2 text-sm">
-                                        ${impactMetrics.proposedEL.toFixed(0)} exp. loss/app
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="p-4 bg-up/5 border border-up/20 rounded">
-                                <div className="grid grid-cols-2 gap-4 text-center">
-                                    <div>
-                                        <p className="kpi-value text-up">
-                                            -{impactMetrics.lossReduction.toFixed(0)}%
-                                        </p>
-                                        <p className="kpi-label">Expected Loss</p>
-                                    </div>
-                                    <div>
-                                        <p className="kpi-value text-warn">
-                                            -{impactMetrics.exposureReduction.toFixed(0)}%
-                                        </p>
-                                        <p className="kpi-label">Avg. Exposure</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={() => saveMutation.mutate()}
-                                disabled={saveMutation.isPending}
-                                className="btn-primary w-full mt-4 h-10"
-                            >
-                                {saveMutation.isPending ? "Saving…" : saveSuccess ? (
-                                    <>Saved! <Check className="ml-2 h-4 w-4" /></>
-                                ) : (
-                                    <><Shield className="mr-2 h-4 w-4" />Save Exposure Settings</>
-                                )}
-                            </button>
-                        </div>
-                    )}
                 </div>
 
-                {/* Right: Risk Profile + Ladder Overlay */}
+                {/* Right: Risk Profile + Impact Simulation */}
+                <div className="space-y-6">
                 <div className="panel p-5">
                     <div className="flex items-start justify-between mb-1">
                         <h3 className="text-sm font-semibold">Risk Profile &amp; Ladder</h3>
@@ -641,6 +581,69 @@ export default function ExposureControl() {
                                 </p>
                                 <p className="kpi-label">Training data mean</p>
                             </div>
+                        </div>
+                    )}
+                </div>
+
+                    {/* Impact Simulation */}
+                    {impactMetrics && (
+                        <div className="panel p-5">
+                            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                                <TrendingDown className="h-4 w-4 text-up" />
+                                Impact Simulation
+                            </h3>
+                            <p className="text-xs text-muted-foreground mb-4">
+                                Baseline is the mean loan amount from training data (${Math.round(amtMean).toLocaleString()}).
+                                Impact = expected loss reduction assuming constant approval volume.
+                            </p>
+
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div className="p-4 bg-muted/20 rounded">
+                                    <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Current (No Limits)</p>
+                                    <p className="text-lg font-bold">${Math.round(impactMetrics.currentAvgAmount).toLocaleString()}</p>
+                                    <p className="text-xs text-muted-foreground">avg. amount</p>
+                                    <p className="text-down font-semibold mt-2 text-sm">
+                                        ${impactMetrics.currentEL.toFixed(0)} exp. loss/app
+                                    </p>
+                                </div>
+                                <div className="p-4 bg-up/5 border border-up/20 rounded">
+                                    <p className="text-xs text-muted-foreground uppercase font-medium mb-1">With Ladder</p>
+                                    <p className="text-lg font-bold">${Math.round(impactMetrics.proposedAvgAmount).toLocaleString()}</p>
+                                    <p className="text-xs text-muted-foreground">avg. amount</p>
+                                    <p className="text-up font-semibold mt-2 text-sm">
+                                        ${impactMetrics.proposedEL.toFixed(0)} exp. loss/app
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-up/5 border border-up/20 rounded">
+                                <div className="grid grid-cols-2 gap-4 text-center">
+                                    <div>
+                                        <p className="kpi-value text-up">
+                                            -{impactMetrics.lossReduction.toFixed(0)}%
+                                        </p>
+                                        <p className="kpi-label">Expected Loss</p>
+                                    </div>
+                                    <div>
+                                        <p className="kpi-value text-warn">
+                                            -{impactMetrics.exposureReduction.toFixed(0)}%
+                                        </p>
+                                        <p className="kpi-label">Avg. Exposure</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={() => saveMutation.mutate()}
+                                disabled={saveMutation.isPending}
+                                className="btn-primary w-full mt-4 h-10"
+                            >
+                                {saveMutation.isPending ? "Saving…" : saveSuccess ? (
+                                    <>Saved! <Check className="ml-2 h-4 w-4" /></>
+                                ) : (
+                                    <><Shield className="mr-2 h-4 w-4" />Save Exposure Settings</>
+                                )}
+                            </button>
                         </div>
                     )}
                 </div>

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dataset } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Loader2, FileText, Upload, AlertCircle, Trash2, Play, ChevronDown, Settings2 } from "lucide-react";
+import { Loader2, FileText, Upload, AlertCircle, Trash2, Play, ChevronDown, Settings2, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function Datasets() {
@@ -281,17 +281,39 @@ export default function Datasets() {
                                         {new Date(ds.created_at).toLocaleDateString()} <span className="mx-1 text-muted-foreground/30">|</span> {new Date(ds.created_at).toLocaleTimeString()}
                                     </td>
                                     <td className="text-right">
-                                        <button
-                                            onClick={() => {
-                                                if (window.confirm("Are you sure you want to delete this dataset?")) {
-                                                    deleteMutation.mutate(ds.id);
-                                                }
-                                            }}
-                                            className="text-muted-foreground hover:text-down transition-colors p-2 rounded-full hover:bg-down/10"
-                                            title="Delete Dataset"
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </button>
+                                        <div className="flex items-center justify-end gap-1">
+                                            <button
+                                                onClick={async () => {
+                                                    try {
+                                                        const res = await api.get(`/datasets/${ds.id}/download`, { responseType: "blob" });
+                                                        const url = window.URL.createObjectURL(new Blob([res.data]));
+                                                        const a = document.createElement("a");
+                                                        a.href = url;
+                                                        a.download = ds.metadata_info?.original_filename || "dataset.csv";
+                                                        a.click();
+                                                        window.URL.revokeObjectURL(url);
+                                                    } catch (e) {
+                                                        console.error(e);
+                                                        alert("Failed to download dataset.");
+                                                    }
+                                                }}
+                                                className="text-muted-foreground hover:text-info transition-colors p-2 rounded-full hover:bg-info/10"
+                                                title="Download Dataset"
+                                            >
+                                                <Download className="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    if (window.confirm("Are you sure you want to delete this dataset?")) {
+                                                        deleteMutation.mutate(ds.id);
+                                                    }
+                                                }}
+                                                className="text-muted-foreground hover:text-down transition-colors p-2 rounded-full hover:bg-down/10"
+                                                title="Delete Dataset"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}

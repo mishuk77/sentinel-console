@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.dataset import Dataset, DatasetStatus
@@ -110,6 +111,38 @@ def list_datasets(
         query = query.filter(Dataset.module_type == module_type)
     datasets = query.order_by(Dataset.created_at.desc()).all()
     return datasets
+
+@router.get("/{dataset_id}/download")
+def download_dataset(
+    dataset_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    dataset = db.query(Dataset).join(DecisionSystem).filter(
+        Dataset.id == dataset_id,
+        DecisionSystem.client_id == current_user.client_id
+    ).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    import tempfile, os
+    tmp_fd, temp_path = tempfile.mkstemp(suffix=".csv")
+    os.close(tmp_fd)
+    try:
+        storage.download_file(dataset.s3_key, temp_path)
+        with open(temp_path, "rb") as f:
+            content = f.read()
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    filename = dataset.metadata_info.get("original_filename", "dataset.csv") if dataset.metadata_info else "dataset.csv"
+    import io
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @router.get("/{dataset_id}/preview")
 def preview_dataset(

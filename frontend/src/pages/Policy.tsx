@@ -36,6 +36,79 @@ function pav(values: number[]): number[] {
     return out;
 }
 
+// ─── Instructions Panel ─────────────────────────────────────────────────────
+
+function PolicyInstructions() {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="panel">
+            <button
+                onClick={() => setOpen(prev => !prev)}
+                className="w-full px-5 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors"
+            >
+                <div className="flex items-center gap-2.5">
+                    <Info className="h-4 w-4 text-info" />
+                    <span className="text-sm font-semibold">How Policy Configuration Works</span>
+                </div>
+                {open
+                    ? <ChevronLeft className="h-4 w-4 text-muted-foreground rotate-90" />
+                    : <ChevronRight className="h-4 w-4 text-muted-foreground rotate-90" />}
+            </button>
+            {open && (
+                <div className="px-5 pb-5 space-y-4 text-sm text-muted-foreground animate-in fade-in slide-in-from-top-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-3">
+                            <div>
+                                <h4 className="font-semibold text-foreground mb-1">Score Cutoff & Approval Rate</h4>
+                                <p>
+                                    The score cutoff determines the minimum model score required for approval.
+                                    Drag the cutoff slider to balance your approval rate against your
+                                    expected bad rate. Moving the cutoff right is more conservative (fewer approvals,
+                                    lower losses); moving it left is more aggressive (more approvals, higher losses).
+                                </p>
+                            </div>
+                            <div>
+                                <h4 className="font-semibold text-foreground mb-1">Global vs. Segmented Policy</h4>
+                                <p>
+                                    <strong>Global</strong> applies a single cutoff to all applicants.{" "}
+                                    <strong>Segmented</strong> lets you define custom cutoffs per segment
+                                    (e.g., by geography, product, or risk tier), allowing targeted risk management
+                                    while maintaining overall portfolio targets.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="space-y-3">
+                            <div>
+                                <h4 className="font-semibold text-foreground mb-1">PAV Isotonic Smoothing</h4>
+                                <p>
+                                    PAV (Pool Adjacent Violators) is an isotonic regression technique that ensures
+                                    predicted bad rates are monotonically non-decreasing across score bins.
+                                    Raw bin rates can be noisy — a higher-risk bin might randomly show a lower
+                                    bad rate than the bin below it due to sampling variance. PAV corrects this by
+                                    merging adjacent bins that violate monotonicity, producing a calibrated
+                                    step function that reflects the true risk ordering.
+                                </p>
+                                <p className="mt-1.5 text-info">
+                                    This is critical for policy setting because non-monotone rates would mean
+                                    your cutoff doesn't cleanly separate good from bad risk — applicants
+                                    in a "safer" bin could actually default more often than those in a riskier one.
+                                </p>
+                            </div>
+                            <div>
+                                <h4 className="font-semibold text-foreground mb-1">Activation</h4>
+                                <p>
+                                    Once configured, activate your policy to make it the live decision rule
+                                    for the selected model. Only one policy can be active per decision system at a time.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function Policy() {
@@ -187,6 +260,9 @@ export default function Policy() {
                     </div>
                 </div>
             </div>
+
+            {/* Collapsible Instructions */}
+            <PolicyInstructions />
 
             {/* Tab Bar */}
             <div className="border-b flex gap-0">
