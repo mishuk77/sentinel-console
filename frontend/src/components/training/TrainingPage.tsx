@@ -187,8 +187,8 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
             setTrainingEvents(res.data || []);
             return res.data;
         },
-        enabled: !!jobId && (trainingState === 'STARTING' || trainingState === 'TRAINING' || trainingState === 'FAILED'),
-        refetchInterval: trainingState === 'FAILED' ? 3000 : 1000,
+        enabled: !!jobId && (trainingState === 'STARTING' || trainingState === 'TRAINING' || trainingState === 'COMPLETED' || trainingState === 'FAILED'),
+        refetchInterval: (trainingState === 'COMPLETED' || trainingState === 'FAILED') ? 3000 : 1000,
     });
 
     // Start Training Mutation
@@ -400,17 +400,22 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
                         </div>
                     </div>
 
-                    {/* Live Training Event Feed */}
-                    {trainingEvents.length > 0 && (
-                        <div className="mx-5 mt-4 mb-5">
-                            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-2">
-                                {isFailed ? "Pipeline Log" : "Live Pipeline Feed"}
-                            </p>
-                            <div className={cn(
-                                "bg-black/20 rounded-lg border border-border/50 overflow-y-auto font-mono text-[11px] p-3 space-y-1",
-                                isFailed ? "max-h-[400px]" : "max-h-[180px]"
-                            )}>
-                                {trainingEvents.map((evt, i) => (
+                    {/* Live Training Event Feed — always visible during training */}
+                    <div className="mx-5 mt-4 mb-5">
+                        <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-2">
+                            {isFailed ? "Pipeline Log" : "Live Pipeline Feed"}
+                        </p>
+                        <div className={cn(
+                            "bg-black/20 rounded-lg border border-border/50 overflow-y-auto font-mono text-[11px] p-3 space-y-1",
+                            isFailed ? "max-h-[400px]" : "max-h-[280px]"
+                        )}>
+                            {trainingEvents.length === 0 ? (
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                    <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
+                                    <span>Connecting to worker — waiting for pipeline events...</span>
+                                </div>
+                            ) : (
+                                trainingEvents.map((evt, i) => (
                                     <div key={i} className="flex items-start gap-2">
                                         <span className={cn(
                                             "shrink-0 mt-0.5 h-1.5 w-1.5 rounded-full",
@@ -432,10 +437,10 @@ export default function TrainingPage({ config }: { config: TrainingPageConfig })
                                             {evt.detail && <span className="text-muted-foreground"> — {evt.detail}</span>}
                                         </span>
                                     </div>
-                                ))}
-                            </div>
+                                ))
+                            )}
                         </div>
-                    )}
+                    </div>
 
                     {trainingState === 'STARTING' && elapsedSeconds >= 45 && (
                         <div className="mx-5 mb-5 mt-4 p-3 bg-warn/10 border border-warn/30 rounded-lg text-sm text-warn">
