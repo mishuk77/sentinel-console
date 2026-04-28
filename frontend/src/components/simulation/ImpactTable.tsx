@@ -464,8 +464,16 @@ function downloadCsv(data: SimulateResponse, title: string) {
         } else {
             cells.push("");
         }
-        // Quote any cell containing a comma
-        lines.push(cells.map((c) => (c.includes(",") ? `"${c}"` : c)).join(","));
+        // RFC 4180-compliant CSV escaping: quote if cell contains comma,
+        // double-quote, newline, or carriage return. Inner double quotes
+        // must be doubled, not escaped with backslash.
+        lines.push(cells.map((c) => {
+            const s = String(c);
+            if (/[",\n\r]/.test(s)) {
+                return `"${s.replace(/"/g, '""')}"`;
+            }
+            return s;
+        }).join(","));
     }
 
     const filename = `sentinel_impact_${meta.dataset_id?.slice(0, 8) || "x"}_${

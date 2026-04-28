@@ -44,13 +44,19 @@ class _FakePolicy:
 
 class _FakeQuery:
     """Minimal mock to stand in for SQLAlchemy query chains used in
-    _resolve_segment_threshold."""
+    _resolve_segment_threshold. Supports .filter(), .order_by(), .all()
+    so the production code's ORDER BY name clause doesn't break tests."""
 
     def __init__(self, results):
         self._results = results
 
     def filter(self, *args, **kwargs):
         return self
+
+    def order_by(self, *args, **kwargs):
+        # Production code orders by segment name for deterministic ties.
+        # Mirror that here so the fake matches real DB behavior.
+        return _FakeQuery(sorted(self._results, key=lambda s: s.name))
 
     def all(self):
         return self._results
@@ -146,6 +152,29 @@ def test_multi_segment_match_picks_most_restrictive():
     )
     assert threshold == 0.4  # most restrictive
     assert matched == "High Risk Region"
+
+
+def test_segment_threshold_tie_break_is_deterministic():
+    """When two segments have identical thresholds, the result must be
+    deterministic across calls — required for audit reproducibility.
+    Tiebreak rule: alphabetical by segment name."""
+    policy = _FakePolicy(id="p1", threshold=0.5)
+    # Three segments with the SAME threshold but different names.
+    # Without a deterministic tiebreak, min() returns the first one in
+    # iteration order, which depends on DB query ordering.
+    segments = [
+        _FakeSegment(id="s1", name="Zebra", filters={"x": "y"}, threshold=0.4),
+        _FakeSegment(id="s2", name="Alpha", filters={"x": "y"}, threshold=0.4),
+        _FakeSegment(id="s3", name="Mango", filters={"x": "y"}, threshold=0.4),
+    ]
+    # Run resolution multiple times — must produce the same result every time
+    results = [_resolve(policy, segments, {"x": "y"}) for _ in range(5)]
+    assert all(r == results[0] for r in results), \
+        f"Non-deterministic tiebreak: got {results}"
+    # With the alphabetical tiebreak, "Alpha" should win
+    threshold, matched = results[0]
+    assert threshold == 0.4
+    assert matched == "Alpha"
 
 
 def test_inactive_segment_ignored():

@@ -154,11 +154,29 @@ class SimulateResponse(BaseModel):
 # array per (model_id, dataset_id) — busted automatically when artifact
 # path changes (which embeds version_id).
 
-_score_cache: dict[tuple[str, str], dict] = {}
+_score_cache: dict[tuple[str, str, str], dict] = {}
 
 
-def _cache_key(model_id: str, dataset_id: str, artifact_path: str) -> tuple[str, str]:
-    return (f"{model_id}::{artifact_path}", dataset_id)
+def _cache_key(
+    model_id: str,
+    dataset_id: str,
+    artifact_path: str,
+    approved_amount_column: Optional[str],
+) -> tuple[str, str, str]:
+    """Cache key for the row-level scores.
+
+    Includes the model artifact path (embeds version_id) AND the dataset's
+    approved_amount_column annotation. The latter is critical: if a user
+    re-tags the column via PATCH /datasets/{id}/metadata, the cached
+    requested_amounts array becomes stale (would be None when it should
+    be populated, or vice versa). Including the column name in the key
+    busts the cache automatically.
+    """
+    return (
+        f"{model_id}::{artifact_path}",
+        dataset_id,
+        approved_amount_column or "",
+    )
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -484,7 +502,10 @@ def _score_dataset(db: Session, model: MLModel, dataset: Dataset):
     step. Cache is automatically invalidated when the artifact path
     changes (which embeds version_id).
     """
-    cache_key = _cache_key(model.id, dataset.id, model.artifact_path)
+    cache_key = _cache_key(
+        model.id, dataset.id, model.artifact_path,
+        dataset.approved_amount_column,
+    )
     cached = _score_cache.get(cache_key)
     if cached is not None:
         return cached["scores"], cached["amounts"]

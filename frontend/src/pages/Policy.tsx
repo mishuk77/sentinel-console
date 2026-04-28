@@ -264,6 +264,11 @@ export default function Policy() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["system", systemId] });
+            // Activate creates a new policy + flips state on the previous
+            // one. Both /policies and /models lists need to refresh so the
+            // UI reflects the new published state and "Last saved" timestamp.
+            queryClient.invalidateQueries({ queryKey: ["policies", systemId] });
+            queryClient.invalidateQueries({ queryKey: ["models", systemId] });
             setActivationSuccess(true);
             setTimeout(() => setActivationSuccess(false), 3000);
         }

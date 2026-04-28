@@ -57,6 +57,14 @@ export function ColumnAnnotationEditor({ dataset, open, onClose }: ColumnAnnotat
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["datasets"] });
+            // Annotation changes affect dollar-metric resolution (Mode 1/2/3),
+            // segment breakouts, and "what changed" diffs — all of which
+            // are cached by separate query keys. Force a refetch so the UI
+            // reflects the new annotations immediately.
+            queryClient.invalidateQueries({ queryKey: ["simulate"] });
+            queryClient.invalidateQueries({ queryKey: ["simulate-breakout"] });
+            queryClient.invalidateQueries({ queryKey: ["policy-diff"] });
+            queryClient.invalidateQueries({ queryKey: ["sim-summary-card"] });
             setSavedAt(new Date());
         },
     });

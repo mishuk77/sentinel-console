@@ -126,6 +126,22 @@ class DecisionService:
 
             score = float(clf.predict_proba(X_final)[0][1])
 
+            # Defense against numerical instability: NaN or out-of-range
+            # scores would silently propagate into loss math (loss = amount
+            # × NaN = NaN; sum of NaNs = NaN). H1-H4 catch this at training
+            # / registration, but a degraded model in production could
+            # still produce a bad row. Clamp to [0, 1] and log loudly.
+            if not (0.0 <= score <= 1.0) or score != score:  # score!=score → NaN
+                logger.warning(
+                    "Score out of [0,1] or NaN: model_id=%s algo=%s raw_score=%s. "
+                    "Clamping to nearest valid value. Investigate the model.",
+                    model.id, algorithm, score,
+                )
+                if score != score:  # NaN
+                    score = 0.0
+                else:
+                    score = max(0.0, min(1.0, score))
+
             self._log_inference(
                 model, algorithm, input_data,
                 X_processed.values, X_final.values, score, schema="v2",
@@ -221,6 +237,19 @@ class DecisionService:
             scores = np.array([
                 self._score_model(db, model, row)[0] for row in input_rows
             ])
+
+        # Defense against numerical instability — same guard as the per-row
+        # path. NaN propagation through batch math would silently corrupt
+        # downstream backtest aggregates.
+        if np.any(~np.isfinite(scores)) or np.any(scores < 0) or np.any(scores > 1):
+            n_bad = int((~np.isfinite(scores)).sum() + (scores < 0).sum() + (scores > 1).sum())
+            logger.warning(
+                "batch_score: %d/%d scores out of [0,1] or non-finite for model_id=%s. "
+                "Clamping. Investigate the model.",
+                n_bad, len(scores), getattr(model, "id", "?"),
+            )
+            scores = np.where(np.isfinite(scores), scores, 0.0)
+            scores = np.clip(scores, 0.0, 1.0)
 
         # TASK-1 acceptance criterion: runtime sanity check
         self._warn_if_batch_saturated(model, algorithm, scores)
@@ -324,11 +353,16 @@ class DecisionService:
         if not policy:
             return None, None
 
+        # Deterministic ordering — when multiple segments tie on threshold,
+        # the same applicant must always route to the same segment across
+        # repeated decisions (audit-trail requirement). We sort by name
+        # secondary so ties resolve consistently regardless of DB query
+        # order (which isn't guaranteed without ORDER BY).
         segments = db.query(PolicySegment).filter(
             PolicySegment.policy_id == policy.id,
             PolicySegment.is_active == True,
             PolicySegment.is_global == False,
-        ).all()
+        ).order_by(PolicySegment.name).all()
 
         matched = []
         for seg in segments:
@@ -348,8 +382,10 @@ class DecisionService:
                 len(matched), [s.name for s, _ in matched],
             )
 
-        # Most restrictive = lowest threshold (fewer applicants approved)
-        seg, t = min(matched, key=lambda x: x[1])
+        # Most restrictive = lowest threshold (fewer applicants approved).
+        # Tiebreak on segment name (alphabetical) so the choice is stable
+        # across calls — required for reproducible decision audit trails.
+        seg, t = min(matched, key=lambda x: (x[1], x[0].name))
         return t, seg.name
 
     def _matches_segment(self, filters: dict, input_data: dict) -> bool:
