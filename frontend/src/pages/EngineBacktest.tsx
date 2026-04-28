@@ -54,6 +54,7 @@ interface BacktestSummary {
     brier_skill_score?: number;
     calibration_error_pp?: number;
     error_message?: string;
+    parquet_available?: boolean;
 }
 
 export default function EngineBacktest() {
@@ -384,19 +385,97 @@ function RunDetail({ run, onClose }: { run: BacktestSummary; onClose: () => void
             </div>
 
             {/* Section 5 — Export */}
-            <div className="panel p-5 flex items-center gap-4">
-                <Download className="h-4 w-4 text-info" />
-                <div className="flex-1">
-                    <p className="text-sm font-medium">Export options</p>
-                    <p className="text-xs text-muted-foreground">
-                        Full Parquet results (S3) coming in next iteration. For now use the row API for ad-hoc analysis.
-                    </p>
+            <div className="panel p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                    <Download className="h-4 w-4 text-info" />
+                    <span className="text-sm font-medium">Export</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* Full Parquet results */}
+                    <ExportButton
+                        title="Full results (Parquet)"
+                        helper={`All ${run.rows_processed.toLocaleString()} rows. Read with pandas, DuckDB, Spark, etc.`}
+                        disabled={!run.parquet_available}
+                        disabledReason="Not yet generated for this run"
+                        url={`/backtest/${run.id}/full-results.parquet`}
+                        filename={`sentinel_backtest_${run.id.slice(0, 8)}.parquet`}
+                    />
+
+                    {/* Summary PDF */}
+                    <ExportButton
+                        title="Summary report (PDF)"
+                        helper="Cover + sections 1-3 in print-friendly format. The slide a CRO shows their CFO."
+                        disabled={run.status !== "completed"}
+                        disabledReason="Run must be completed"
+                        url={`/backtest/${run.id}/summary.pdf`}
+                        filename={`sentinel_backtest_summary_${run.id.slice(0, 8)}.pdf`}
+                    />
+
+                    {/* Calibration PDF */}
+                    <ExportButton
+                        title="Calibration evidence (PDF)"
+                        helper="Section 3 only. SR 11-7 model validation evidence."
+                        disabled={run.status !== "completed" || !run.has_outcomes}
+                        disabledReason={!run.has_outcomes ? "No outcome label on this dataset" : "Run must be completed"}
+                        url={`/backtest/${run.id}/calibration.pdf`}
+                        filename={`sentinel_calibration_${run.id.slice(0, 8)}.pdf`}
+                    />
                 </div>
             </div>
 
             {/* Audit info */}
             <AuditInfo meta={meta} />
         </div>
+    );
+}
+
+function ExportButton({
+    title,
+    helper,
+    disabled,
+    disabledReason,
+    url,
+    filename,
+}: {
+    title: string;
+    helper: string;
+    disabled: boolean;
+    disabledReason: string;
+    url: string;
+    filename: string;
+}) {
+    return (
+        <button
+            onClick={async () => {
+                try {
+                    const res = await api.get(url, { responseType: "blob" });
+                    const blobUrl = window.URL.createObjectURL(new Blob([res.data]));
+                    const a = document.createElement("a");
+                    a.href = blobUrl;
+                    a.download = filename;
+                    a.click();
+                    window.URL.revokeObjectURL(blobUrl);
+                } catch (e: any) {
+                    alert(e?.response?.data?.detail || "Download failed");
+                }
+            }}
+            disabled={disabled}
+            className={cn(
+                "p-4 border rounded text-left transition-colors",
+                disabled
+                    ? "border-border opacity-50 cursor-not-allowed"
+                    : "hover:bg-muted/30 border-info/30 bg-info/5 cursor-pointer",
+            )}
+        >
+            <div className="flex items-center gap-2 mb-1">
+                <Download className="h-3.5 w-3.5 text-info" />
+                <span className="text-sm font-semibold">{title}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+                {helper}
+                {disabled && ` — ${disabledReason}`}
+            </p>
+        </button>
     );
 }
 

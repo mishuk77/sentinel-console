@@ -109,6 +109,8 @@ class BacktestSummaryOut(BaseModel):
     brier_skill_score: Optional[float]
     calibration_error_pp: Optional[float]
     error_message: Optional[str]
+    # TASK-8: full Parquet result download availability
+    parquet_available: bool = False
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -287,6 +289,139 @@ def get_backtest_rows(
         "page_size": page_size,
         "total": min(_INLINE_ROW_LIMIT, run.rows_processed),
     }
+
+
+@router.get("/{run_id}/summary.pdf")
+def download_summary_pdf(
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """TASK-11I: executive summary PDF (cover + sections 1-3).
+
+    Print-friendly format — the slide a CRO shows their CFO. Complies
+    with TASK-11I export standards (audit metadata cover, page header
+    with run ID + page X of Y, footer with tenant name)."""
+    from fastapi.responses import StreamingResponse
+    from app.services.pdf_export import export_backtest_summary_pdf
+
+    run = _load_run(db, run_id, current_user)
+    if run.status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot export — run status is '{run.status}'.",
+        )
+
+    run_dict = _summary_out(run).model_dump()
+    # Enrich with model + policy display names that aren't on the summary
+    if run.model_id:
+        m = db.query(MLModel).filter(MLModel.id == run.model_id).first()
+        if m:
+            run_dict["model_name"] = m.name
+            run_dict["model_algorithm"] = m.algorithm
+    if run.policy_id:
+        p = db.query(Policy).filter(Policy.id == run.policy_id).first()
+        if p:
+            run_dict["policy_label"] = f"{p.id[:8]} (state={p.state or 'unknown'}, threshold={p.threshold:.4f})"
+
+    pdf_bytes = export_backtest_summary_pdf(run_dict)
+    filename = f"sentinel_backtest_summary_{run.id[:8]}_{run.started_at.strftime('%Y%m%d_%H%M%S') if run.started_at else 'unknown'}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{run_id}/calibration.pdf")
+def download_calibration_pdf(
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """TASK-11I: calibration-only PDF — SR 11-7 validation evidence.
+
+    Single section, no executive overhead. The kind of doc a model
+    validator wants to file in their evidence binder."""
+    from fastapi.responses import StreamingResponse
+    from app.services.pdf_export import export_calibration_only_pdf
+
+    run = _load_run(db, run_id, current_user)
+    if run.status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot export — run status is '{run.status}'.",
+        )
+
+    run_dict = _summary_out(run).model_dump()
+    if run.model_id:
+        m = db.query(MLModel).filter(MLModel.id == run.model_id).first()
+        if m:
+            run_dict["model_name"] = m.name
+            run_dict["model_algorithm"] = m.algorithm
+    if run.policy_id:
+        p = db.query(Policy).filter(Policy.id == run.policy_id).first()
+        if p:
+            run_dict["policy_label"] = f"{p.id[:8]} (state={p.state or 'unknown'}, threshold={p.threshold:.4f})"
+
+    pdf_bytes = export_calibration_only_pdf(run_dict)
+    filename = f"sentinel_calibration_evidence_{run.id[:8]}_{run.started_at.strftime('%Y%m%d_%H%M%S') if run.started_at else 'unknown'}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{run_id}/full-results.parquet")
+def download_full_results(
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Download the full row-level results as a Parquet file.
+
+    Returns the file directly (streaming response) — most analysis tools
+    (DuckDB, Spark, pandas) read Parquet natively.
+
+    File schema:
+        row_index, application_id, score, decision, approved_amount,
+        predicted_loss, actual_outcome,
+        shap_feature_1..3, shap_value_1..3 (only for first 1000 rows
+        when SHAP was computed)
+    """
+    from fastapi.responses import StreamingResponse
+    import os as _os
+    import tempfile as _tempfile
+
+    run = _load_run(db, run_id, current_user)
+    if not run.parquet_s3_uri:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Parquet results not available for this run. Either the "
+                "run is still running, the export failed (see logs), or "
+                "this run predates the Parquet feature."
+            ),
+        )
+
+    tmp_fd, tmp_path = _tempfile.mkstemp(suffix=".parquet")
+    _os.close(tmp_fd)
+    try:
+        storage.download_file(run.parquet_s3_uri, tmp_path)
+        with open(tmp_path, "rb") as f:
+            content = f.read()
+    finally:
+        if _os.path.exists(tmp_path):
+            _os.remove(tmp_path)
+
+    filename = f"sentinel_backtest_{run.id[:8]}_{run.started_at.strftime('%Y%m%d_%H%M%S') if run.started_at else 'unknown'}.parquet"
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("")
@@ -472,7 +607,7 @@ def _execute_backtest(
         artifact, df[feature_cols], n=_INLINE_ROW_LIMIT,
     )
 
-    # Persist first 1000 row-level results
+    # Persist first 1000 row-level results to Postgres for fast drill-down
     n_to_store = min(_INLINE_ROW_LIMIT, len(scores))
     for i in range(n_to_store):
         row_result = BacktestRowResult(
@@ -487,7 +622,122 @@ def _execute_backtest(
         )
         db.add(row_result)
 
+    # TASK-8 follow-up: write the FULL row-level results to S3 as Parquet.
+    # This is the source of truth for any deep drill-down beyond row 1000
+    # and the only way users can take results offline for their own
+    # analysis (compliance teams routinely re-run their own checks on the
+    # raw output).
+    parquet_uri = _write_full_results_parquet(
+        run=run,
+        scores=scores,
+        decisions=decisions,
+        approved_amounts=approved_amounts,
+        outcomes=outcomes,
+        app_ids=app_ids,
+        shap_top_per_row=shap_top_per_row,
+    )
+    if parquet_uri:
+        run.parquet_s3_uri = parquet_uri
+
     db.commit()
+
+
+def _write_full_results_parquet(
+    run: BacktestRun,
+    scores: np.ndarray,
+    decisions: np.ndarray,
+    approved_amounts: Optional[np.ndarray],
+    outcomes: Optional[np.ndarray],
+    app_ids: Optional[list],
+    shap_top_per_row: Optional[list],
+) -> Optional[str]:
+    """
+    Write all rows (not just the first 1000) to a Parquet file on S3.
+
+    Returns the storage URI (e.g. ``s3://sentinel-models-prod/backtests/{run_id}.parquet``)
+    or None if the write fails (Parquet output is best-effort — an upload
+    failure does NOT block the backtest from completing).
+
+    Schema:
+        row_index, application_id, score, decision, approved_amount,
+        predicted_loss, actual_outcome, shap_feature_1, shap_value_1,
+        shap_feature_2, shap_value_2, shap_feature_3, shap_value_3
+    """
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        n = len(scores)
+        # Build the columnar arrays
+        row_indices = list(range(n))
+        ids_col = (
+            [str(a) for a in app_ids[:n]]
+            if app_ids is not None
+            else [f"row_{i}" for i in range(n)]
+        )
+        scores_col = scores.astype(float).tolist()
+        decisions_col = [str(d) for d in decisions]
+        amounts_col = (
+            approved_amounts.astype(float).tolist()
+            if approved_amounts is not None
+            else [None] * n
+        )
+        # Predicted loss per row = approved_amount × probability
+        if approved_amounts is not None:
+            loss_col = (approved_amounts * scores).astype(float).tolist()
+        else:
+            loss_col = [None] * n
+        outcomes_col = (
+            [int(o) if o >= 0 else None for o in outcomes]
+            if outcomes is not None
+            else [None] * n
+        )
+
+        # SHAP: flatten the top-3 per row into 6 columns. Rows beyond
+        # _INLINE_ROW_LIMIT will have None (we only computed SHAP for the
+        # first 1000 rows for cost reasons).
+        def _shap_field(i, k, attr):
+            if shap_top_per_row is None:
+                return None
+            if i >= len(shap_top_per_row) or not shap_top_per_row[i]:
+                return None
+            if k >= len(shap_top_per_row[i]):
+                return None
+            return shap_top_per_row[i][k].get(attr)
+
+        shap_cols = {
+            f"shap_{attr}_{k+1}": [_shap_field(i, k, attr) for i in range(n)]
+            for k in range(3)
+            for attr in ("feature", "value")
+        }
+
+        table = pa.table({
+            "row_index": row_indices,
+            "application_id": ids_col,
+            "score": scores_col,
+            "decision": decisions_col,
+            "approved_amount": amounts_col,
+            "predicted_loss": loss_col,
+            "actual_outcome": outcomes_col,
+            **shap_cols,
+        })
+
+        # Serialize to in-memory buffer, then upload via the existing
+        # storage abstraction (handles S3 + local + S3-compatible).
+        buf = io.BytesIO()
+        pq.write_table(table, buf, compression="snappy")
+        buf.seek(0)
+
+        s3_key = f"backtests/{run.id}.parquet"
+        storage.upload_file(buf, s3_key)
+        return s3_key  # storage.* paths are relative; the storage client
+                       # resolves to the full S3 URI on demand
+    except Exception as e:
+        import logging
+        logging.getLogger("sentinel.backtest").warning(
+            "Parquet export skipped due to error: %s", e,
+        )
+        return None
 
 
 def _compute_batch_shap(
@@ -616,4 +866,5 @@ def _summary_out(run: BacktestRun) -> BacktestSummaryOut:
         brier_skill_score=run.brier_skill_score,
         calibration_error_pp=run.calibration_error_pp,
         error_message=run.error_message,
+        parquet_available=bool(run.parquet_s3_uri),
     )
