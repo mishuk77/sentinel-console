@@ -400,6 +400,146 @@ def _ladder_lookup(ladder: dict, decile: int) -> Optional[float]:
     return None
 
 
+@dataclass
+class PolicyDiff:
+    """TASK-11G + TASK-11H: row-level diff between two policy configs.
+
+    Returns the set of applicants that cross a decision boundary when
+    moving from policy A → policy B, with counts, dollar volume, and
+    (when available) the list of application IDs.
+    """
+
+    # Applicants newly approved by B that were denied by A
+    newly_approved_count: int
+    newly_approved_dollars: Optional[float]
+    newly_approved_ids: list
+
+    # Applicants newly denied by B that were approved by A
+    newly_denied_count: int
+    newly_denied_dollars: Optional[float]  # under A, since they're not approved by B
+    newly_denied_ids: list
+
+    # Applicants approved by both but with reduced amount under B
+    reduced_amount_count: int
+    reduced_amount_total_reduction: Optional[float]
+    reduced_amount_ids: list
+
+    # Aggregate metrics from each policy for context
+    policy_a: StageMetrics
+    policy_b: StageMetrics
+
+    def to_dict(self) -> dict:
+        return {
+            "newly_approved_count": self.newly_approved_count,
+            "newly_approved_dollars": self.newly_approved_dollars,
+            "newly_approved_ids": self.newly_approved_ids,
+            "newly_denied_count": self.newly_denied_count,
+            "newly_denied_dollars": self.newly_denied_dollars,
+            "newly_denied_ids": self.newly_denied_ids,
+            "reduced_amount_count": self.reduced_amount_count,
+            "reduced_amount_total_reduction": self.reduced_amount_total_reduction,
+            "reduced_amount_ids": self.reduced_amount_ids,
+            "policy_a": self.policy_a.to_dict(),
+            "policy_b": self.policy_b.to_dict(),
+        }
+
+
+def diff_policies(
+    inputs: SimulationInputs,
+    policy_a: PolicyConfig,
+    policy_b: PolicyConfig,
+    max_ids_per_bucket: int = 100,
+) -> PolicyDiff:
+    """
+    Compute the row-level diff between two policy configurations applied
+    to the same population.
+
+    Used by:
+        TASK-11G — "What changed" diff panel on Exposure Control + Policy
+        TASK-11H — Compare against prior published policy on simulation pages
+
+    The applicant ID lists are capped at max_ids_per_bucket to keep the
+    response payload sane on large datasets; counts and dollar totals are
+    always exact.
+    """
+    scores = np.asarray(inputs.scores, dtype=float)
+    n = len(scores)
+    if n == 0:
+        raise ValueError("diff_policies called with zero rows")
+
+    has_amounts = inputs.requested_amounts is not None
+    requested = np.asarray(inputs.requested_amounts, dtype=float) if has_amounts else None
+    app_ids = inputs.application_ids if inputs.application_ids is not None else [
+        f"row_{i}" for i in range(n)
+    ]
+
+    # Compute per-row decisions and amounts under each policy
+    cut_a = scores < policy_a.cutoff
+    cut_b = scores < policy_b.cutoff
+
+    if has_amounts:
+        amts_a = (
+            _apply_ladder(requested, scores, cut_a, policy_a.amount_ladder, policy_a.n_deciles)
+            if policy_a.amount_ladder
+            else np.where(cut_a, requested, 0.0)
+        )
+        amts_b = (
+            _apply_ladder(requested, scores, cut_b, policy_b.amount_ladder, policy_b.n_deciles)
+            if policy_b.amount_ladder
+            else np.where(cut_b, requested, 0.0)
+        )
+    else:
+        amts_a = amts_b = None
+
+    # Bucket categorization
+    newly_approved = (~cut_a) & cut_b
+    newly_denied = cut_a & (~cut_b)
+    both_approved = cut_a & cut_b
+    reduced = both_approved & (
+        (amts_b < amts_a) if amts_a is not None and amts_b is not None
+        else np.zeros(n, dtype=bool)
+    )
+
+    def _ids(mask):
+        idxs = np.where(mask)[0]
+        return [str(app_ids[i]) for i in idxs[:max_ids_per_bucket]]
+
+    newly_approved_dollars = (
+        float(amts_b[newly_approved].sum()) if amts_b is not None else None
+    )
+    newly_denied_dollars = (
+        float(amts_a[newly_denied].sum()) if amts_a is not None else None
+    )
+    if amts_a is not None and amts_b is not None:
+        reduction_total = float((amts_a[reduced] - amts_b[reduced]).sum())
+    else:
+        reduction_total = None
+
+    # Compute aggregate stage metrics for both policies for the side panel
+    def _stage_for(mask, amts, name):
+        return _compute_stage(
+            stage_name=name,
+            approved_mask=mask,
+            approved_amounts=amts,
+            scores=scores,
+            n_total=n,
+        )
+
+    return PolicyDiff(
+        newly_approved_count=int(newly_approved.sum()),
+        newly_approved_dollars=newly_approved_dollars,
+        newly_approved_ids=_ids(newly_approved),
+        newly_denied_count=int(newly_denied.sum()),
+        newly_denied_dollars=newly_denied_dollars,
+        newly_denied_ids=_ids(newly_denied),
+        reduced_amount_count=int(reduced.sum()),
+        reduced_amount_total_reduction=reduction_total,
+        reduced_amount_ids=_ids(reduced),
+        policy_a=_stage_for(cut_a, amts_a, "policy_a"),
+        policy_b=_stage_for(cut_b, amts_b, "policy_b"),
+    )
+
+
 def _compute_deltas(
     baseline: StageMetrics, final: StageMetrics
 ) -> list[StageDelta]:

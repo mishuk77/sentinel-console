@@ -9,6 +9,7 @@ import {
     Shield, ArrowRight, Check, Info, ArrowLeft, CheckCircle
 } from "lucide-react";
 import { ImpactTable } from "@/components/simulation/ImpactTable";
+import { PolicyDiff } from "@/components/simulation/PolicyDiff";
 import { cn } from "@/lib/utils";
 import {
     ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
@@ -358,6 +359,26 @@ export default function ExposureControl() {
                     amountLadder={amountLadder}
                     title="Full Impact Analysis"
                     description="Baseline → policy cuts → policy + amount ladder. All three stages on the same population, predicted loss computed from the model."
+                />
+            )}
+
+            {/* TASK-11G + TASK-11H: 'What changed' diff between published policy
+                 and the in-flight ladder edits. Hidden when nothing has changed. */}
+            {activeModel?.dataset_id && activePolicy?.threshold !== undefined && (
+                <PolicyDiff
+                    datasetId={activeModel.dataset_id}
+                    modelId={activeModel.id}
+                    policyA={{
+                        cutoff: activePolicy.threshold,
+                        amount_ladder: activePolicy.amount_ladder || null,
+                        label: "Published policy",
+                    }}
+                    policyB={{
+                        cutoff: activePolicy.threshold,
+                        amount_ladder: amountLadder,
+                        label: "Proposed (current edits)",
+                    }}
+                    title="What changed — current vs proposed ladder"
                 />
             )}
 

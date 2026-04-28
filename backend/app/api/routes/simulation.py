@@ -50,6 +50,7 @@ from app.services.portfolio_simulation import (
     PolicyConfig,
     SimulationInputs,
     simulate_portfolio,
+    diff_policies,
 )
 from app.services.storage import storage
 
@@ -169,6 +170,104 @@ _ENGINE_VERSION = "1.0.0"
 # ────────────────────────────────────────────────────────────────────────
 # Endpoints
 # ────────────────────────────────────────────────────────────────────────
+
+
+class PolicyParams(BaseModel):
+    cutoff: float
+    amount_ladder: Optional[dict] = None
+    label: Optional[str] = None  # e.g. "current production" or "proposed"
+    model_config = {"protected_namespaces": ()}
+
+
+class DiffRequest(BaseModel):
+    """Body of POST /simulate/diff — TASK-11G + TASK-11H."""
+    dataset_id: str
+    model_id: str
+    policy_a: PolicyParams  # current production / baseline
+    policy_b: PolicyParams  # proposed / new
+    n_deciles: int = 10
+    max_ids_per_bucket: int = 100
+    model_config = {"protected_namespaces": ()}
+
+
+@router.post("/diff")
+def simulate_diff_endpoint(
+    req: DiffRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Row-level diff between two policy configurations.
+
+    Used by:
+        TASK-11G — "What changed" diff panel on the Exposure Control + Policy
+                   pages. Shows newly approved / newly denied / reduced
+                   applications when the user adjusts policy parameters.
+        TASK-11H — "Compare against published policy" mode on simulation
+                   pages. Renders side-by-side metrics for the current
+                   production policy vs. the proposed configuration.
+
+    Returns counts + dollar volumes + capped lists of application IDs for
+    each diff bucket, plus full StageMetrics for both policies for
+    side-by-side rendering.
+    """
+    # Auth
+    model = db.query(MLModel).join(DecisionSystem).filter(
+        MLModel.id == req.model_id,
+        DecisionSystem.client_id == current_user.client_id,
+    ).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    dataset = db.query(Dataset).filter(Dataset.id == req.dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # Score (cached)
+    scores, requested_amounts = _score_dataset(db, model, dataset)
+
+    # Pull application IDs from the dataset if id_column is annotated
+    app_ids = None
+    if dataset.id_column:
+        try:
+            local_csv = f"temp_diff_{dataset.id[:8]}.csv"
+            try:
+                storage.download_file(dataset.s3_key, local_csv)
+                df = pd.read_csv(local_csv)
+            finally:
+                if os.path.exists(local_csv):
+                    os.remove(local_csv)
+            if dataset.id_column in df.columns:
+                app_ids = df[dataset.id_column].astype(str).tolist()
+        except Exception:
+            app_ids = None
+
+    inputs = SimulationInputs(
+        scores=scores,
+        requested_amounts=requested_amounts,
+        application_ids=app_ids,
+    )
+    pa = PolicyConfig(
+        cutoff=req.policy_a.cutoff,
+        amount_ladder=req.policy_a.amount_ladder,
+        n_deciles=req.n_deciles,
+    )
+    pb = PolicyConfig(
+        cutoff=req.policy_b.cutoff,
+        amount_ladder=req.policy_b.amount_ladder,
+        n_deciles=req.n_deciles,
+    )
+
+    diff = diff_policies(
+        inputs, pa, pb, max_ids_per_bucket=req.max_ids_per_bucket
+    )
+
+    return {
+        **diff.to_dict(),
+        "policy_a_label": req.policy_a.label or "Policy A",
+        "policy_b_label": req.policy_b.label or "Policy B",
+        "id_column": dataset.id_column,
+        "has_real_ids": app_ids is not None,
+    }
 
 
 @router.post("/portfolio", response_model=SimulateResponse)
