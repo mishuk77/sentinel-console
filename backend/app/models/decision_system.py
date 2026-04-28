@@ -21,6 +21,11 @@ class DecisionSystem(Base):
     active_fraud_model_id = Column(String, nullable=True)
     active_policy_id = Column(String, nullable=True)
 
+    # TASK-10 Layer 3: status from the most recent runtime health monitor
+    # tick. healthy | warning | degraded. Updated by the Celery beat task
+    # in app.workers.inference_health_monitor.
+    runtime_health_status = Column(String, nullable=True)
+
     # Relationships
     datasets = relationship("Dataset", back_populates="decision_system", cascade="all, delete-orphan")
     models = relationship("MLModel", back_populates="decision_system", cascade="all, delete-orphan")

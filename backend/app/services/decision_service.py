@@ -415,6 +415,16 @@ class DecisionService:
 
             credit_score, credit_df, credit_clf = self._score_model(db, credit_model, input_data)
 
+            # TASK-10 Layer 3: push every production prediction into the
+            # rolling window so the scheduled health monitor can spot
+            # runtime drift / saturation. Best-effort — never break a
+            # decision because monitoring infra is down.
+            try:
+                from app.services.inference_window import push_prediction
+                push_prediction(system_id, credit_score)
+            except Exception:
+                pass
+
             # TASK-4A: cascading segment policy resolution. Apply segment
             # threshold if the applicant matches one with a custom cutoff;
             # otherwise fall back to the global policy threshold.

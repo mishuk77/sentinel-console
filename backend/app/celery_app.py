@@ -29,5 +29,17 @@ celery_app.conf.update(
     task_soft_time_limit=3000,
 )
 
-# Auto-discover tasks in app.tasks
-celery_app.autodiscover_tasks(["app"])
+# TASK-10 Layer 3: Celery beat schedule. Runs the inference health
+# monitor every 5 minutes against the rolling window of recent
+# predictions per active decision system.
+from celery.schedules import crontab as _crontab  # noqa: E402
+
+celery_app.conf.beat_schedule = {
+    "inference-health-monitor": {
+        "task": "sentinel.inference_health_monitor",
+        "schedule": 300.0,  # every 5 minutes
+    },
+}
+
+# Auto-discover tasks in app.tasks AND app.workers (TASK-10 Layer 3)
+celery_app.autodiscover_tasks(["app", "app.workers"])

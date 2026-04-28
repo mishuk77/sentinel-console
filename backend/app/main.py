@@ -78,6 +78,8 @@ def startup_event():
             "active_model_id": "VARCHAR",
             "active_fraud_model_id": "VARCHAR",
             "active_policy_id": "VARCHAR",
+            # TASK-10 Layer 3: status surfaced by the inference health monitor
+            "runtime_health_status": "VARCHAR",
         }
         for col_name, col_type in ds_migrations.items():
             if col_name not in columns:
