@@ -10,6 +10,7 @@ import ModelDetail from "@/pages/ModelDetail";
 import Deployments from "@/pages/Deployments";
 import Policy from "@/pages/Policy";
 import ExposureControl from "@/pages/ExposureControl";
+import SimulationSummary from "@/pages/SimulationSummary";
 import FraudOverview from "@/pages/FraudOverview";
 import FraudData from "@/pages/FraudData";
 import FraudTraining from "@/pages/FraudTraining";
@@ -127,6 +128,9 @@ function App() {
                     <ExposureControl />
                   </ModuleGuard>
                 } />
+
+                {/* TASK-7: Projected Simulation Summary */}
+                <Route path="simulation-summary" element={<SimulationSummary />} />
 
                 {/* Monitoring */}
                 <Route path="monitoring" element={<Monitoring />} />
