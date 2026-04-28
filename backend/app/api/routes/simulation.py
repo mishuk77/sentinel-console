@@ -51,6 +51,7 @@ from app.services.portfolio_simulation import (
     SimulationInputs,
     simulate_portfolio,
     diff_policies,
+    break_out_by_dimension,
 )
 from app.services.storage import storage
 
@@ -177,6 +178,93 @@ class PolicyParams(BaseModel):
     amount_ladder: Optional[dict] = None
     label: Optional[str] = None  # e.g. "current production" or "proposed"
     model_config = {"protected_namespaces": ()}
+
+
+class BreakoutRequest(BaseModel):
+    """Body of POST /simulate/breakout — TASK-11F segment breakouts."""
+    dataset_id: str
+    model_id: str
+    cutoff: float
+    amount_ladder: Optional[dict] = None
+    n_deciles: int = 10
+    dimension: str  # the column name to break out by
+    stage: str = "policy_cuts_ladder"  # baseline | policy_cuts | policy_cuts_ladder
+    model_config = {"protected_namespaces": ()}
+
+
+@router.post("/breakout")
+def simulate_breakout_endpoint(
+    req: BreakoutRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Per-segment metrics for a single stage. Used by the TASK-11F
+    "Break out by segment" toggle on aggregate views.
+
+    Reconciliation invariant: sum of per-segment metrics equals the
+    portfolio total for the same stage. Verified by tests in
+    test_segment_breakout.py.
+    """
+    # Auth
+    model = db.query(MLModel).join(DecisionSystem).filter(
+        MLModel.id == req.model_id,
+        DecisionSystem.client_id == current_user.client_id,
+    ).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    dataset = db.query(Dataset).filter(Dataset.id == req.dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # Validate the dimension column is tagged on the dataset (per spec)
+    seg_dims = dataset.segmenting_dimensions or []
+    if req.dimension not in seg_dims:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Column '{req.dimension}' is not tagged as a segmenting "
+                f"dimension on this dataset. Tag it via PATCH "
+                f"/datasets/{{id}}/metadata first. Currently tagged: "
+                f"{seg_dims}"
+            ),
+        )
+
+    # Score (cached) and read the dimension column from the raw dataset
+    scores, requested_amounts = _score_dataset(db, model, dataset)
+
+    local_csv = f"temp_breakout_{dataset.id[:8]}.csv"
+    try:
+        storage.download_file(dataset.s3_key, local_csv)
+        df = pd.read_csv(local_csv)
+    finally:
+        if os.path.exists(local_csv):
+            os.remove(local_csv)
+
+    if req.dimension not in df.columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column '{req.dimension}' not present in dataset CSV.",
+        )
+
+    dimension_values = df[req.dimension].astype(str).tolist()
+
+    inputs = SimulationInputs(scores=scores, requested_amounts=requested_amounts)
+    policy = PolicyConfig(
+        cutoff=req.cutoff,
+        amount_ladder=req.amount_ladder,
+        n_deciles=req.n_deciles,
+    )
+
+    breakouts = break_out_by_dimension(
+        inputs, policy, dimension_values, req.dimension, stage=req.stage,
+    )
+
+    return {
+        "dimension": req.dimension,
+        "stage": req.stage,
+        "segments": [b.to_dict() for b in breakouts],
+    }
 
 
 class DiffRequest(BaseModel):

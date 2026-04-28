@@ -55,6 +55,16 @@ export default function ExposureControl() {
         enabled: !!systemId
     });
 
+    // TASK-11F: pull dataset annotations to surface segmenting dimensions
+    const { data: datasets } = useQuery<any[]>({
+        queryKey: ["datasets", systemId],
+        queryFn: async () => {
+            const res = await api.get("/datasets/", { params: { system_id: systemId } });
+            return res.data;
+        },
+        enabled: !!systemId,
+    });
+
     const { data: policies } = useQuery({
         queryKey: ["policies", systemId],
         queryFn: async () => {
@@ -359,6 +369,10 @@ export default function ExposureControl() {
                     amountLadder={amountLadder}
                     title="Full Impact Analysis"
                     description="Baseline → policy cuts → policy + amount ladder. All three stages on the same population, predicted loss computed from the model."
+                    segmentingDimensions={
+                        datasets?.find((d: any) => d.id === activeModel.dataset_id)
+                            ?.segmenting_dimensions || []
+                    }
                 />
             )}
 

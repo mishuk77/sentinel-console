@@ -65,7 +65,7 @@ for context, never mixed into the comparison.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import Optional, Literal
 
 import numpy as np
 import pandas as pd
@@ -398,6 +398,124 @@ def _ladder_lookup(ladder: dict, decile: int) -> Optional[float]:
     if str_key in ladder:
         return float(ladder[str_key])
     return None
+
+
+@dataclass
+class SegmentBreakout:
+    """TASK-11F: per-segment portfolio metrics for a single stage.
+
+    The same StageMetrics structure as the aggregate, plus segment
+    metadata (name and applicant count). Reconciliation rule: the sum
+    of per-segment metrics MUST equal the portfolio total (this is
+    enforced as a test in test_segment_breakout.py)."""
+
+    segment_label: str
+    segment_value: object
+    n_applications: int
+    metrics: StageMetrics
+
+    def to_dict(self) -> dict:
+        return {
+            "segment_label": self.segment_label,
+            "segment_value": str(self.segment_value),
+            "n_applications": self.n_applications,
+            "metrics": self.metrics.to_dict(),
+        }
+
+
+def break_out_by_dimension(
+    inputs: SimulationInputs,
+    policy: PolicyConfig,
+    dimension_values: list,
+    dimension_label: str,
+    stage: Literal["baseline", "policy_cuts", "policy_cuts_ladder"] = "policy_cuts_ladder",
+) -> list[SegmentBreakout]:
+    """
+    Apply ``policy`` to the population and break out results by ``dimension_values``.
+
+    Parameters
+    ----------
+    inputs : SimulationInputs
+        Same population inputs used by simulate_portfolio.
+    policy : PolicyConfig
+        The policy configuration to apply.
+    dimension_values : list
+        Per-row values of the breakout dimension. Length must equal the
+        number of rows in inputs.scores.
+    dimension_label : str
+        Human-readable label for the dimension (e.g. 'channel').
+    stage : str
+        Which stage to compute the per-segment metrics for. Default is
+        'policy_cuts_ladder' — the production-equivalent stage.
+
+    Returns
+    -------
+    list[SegmentBreakout]
+        One per unique dimension value, sorted by segment value.
+
+    Reconciliation invariant (per TASK-11B + TASK-11F):
+        sum(per_segment_metrics) == portfolio_metrics  (within rounding)
+    The sum of segment counts MUST equal total_applications. The sum of
+    segment dollar metrics MUST equal the portfolio dollar metrics.
+    Tested in test_segment_breakout.py.
+    """
+    scores = np.asarray(inputs.scores, dtype=float)
+    n = len(scores)
+    if len(dimension_values) != n:
+        raise ValueError(
+            f"dimension_values length ({len(dimension_values)}) must match "
+            f"scores length ({n})"
+        )
+
+    has_amounts = inputs.requested_amounts is not None
+    requested = np.asarray(inputs.requested_amounts, dtype=float) if has_amounts else None
+
+    # Compute the policy mask + amounts once for the whole population
+    if stage == "baseline":
+        approved_mask = np.ones(n, dtype=bool)
+        amounts = requested
+    elif stage == "policy_cuts":
+        approved_mask = scores < policy.cutoff
+        amounts = requested if has_amounts else None
+    else:  # policy_cuts_ladder
+        approved_mask = scores < policy.cutoff
+        if policy.amount_ladder and has_amounts:
+            amounts = _apply_ladder(
+                requested, scores, approved_mask,
+                policy.amount_ladder, policy.n_deciles,
+            )
+        else:
+            amounts = requested if has_amounts else None
+
+    # Group by dimension value (preserve order via dict)
+    dim_array = np.asarray(dimension_values, dtype=object)
+    unique_vals = sorted({str(v) for v in dim_array.tolist()})
+
+    results: list[SegmentBreakout] = []
+    for val in unique_vals:
+        seg_mask = (dim_array.astype(str) == val)
+        seg_n = int(seg_mask.sum())
+        if seg_n == 0:
+            continue
+        # Restrict scores/amounts/approved_mask to this segment
+        seg_scores = scores[seg_mask]
+        seg_approved = approved_mask[seg_mask]
+        seg_amounts = amounts[seg_mask] if amounts is not None else None
+        metrics = _compute_stage(
+            stage_name=f"{stage}_{val}",
+            approved_mask=seg_approved,
+            approved_amounts=seg_amounts,
+            scores=seg_scores,
+            n_total=seg_n,
+        )
+        results.append(SegmentBreakout(
+            segment_label=dimension_label,
+            segment_value=val,
+            n_applications=seg_n,
+            metrics=metrics,
+        ))
+
+    return results
 
 
 @dataclass

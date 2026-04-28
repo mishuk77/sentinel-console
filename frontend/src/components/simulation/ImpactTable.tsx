@@ -10,8 +10,9 @@
  *   - ExposureControl page (TASK-3 — primary use)
  *   - Future TASK-7 reuse with different column labels
  */
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, Loader2, AlertTriangle } from "lucide-react";
+import { Download, Loader2, AlertTriangle, Layers } from "lucide-react";
 import { api } from "@/lib/api";
 import { ComparisonTable } from "@/components/ui/ComparisonTable";
 import type {
@@ -20,7 +21,7 @@ import type {
 } from "@/components/ui/ComparisonTable";
 import { AuditInfo } from "@/components/ui/AuditInfo";
 import type { AuditMeta } from "@/components/ui/AuditInfo";
-import { formatMetric } from "@/components/ui/MetricValue";
+import { MetricValue, formatMetric } from "@/components/ui/MetricValue";
 import { cn } from "@/lib/utils";
 
 interface SimulateResponse {
@@ -43,6 +44,10 @@ interface ImpactTableProps {
     title?: string;
     /** Optional helper text below the title. */
     description?: string;
+    /** TASK-11F: list of segmenting dimensions tagged on the dataset.
+     *  When provided, shows a "Break out by segment" dropdown that
+     *  expands the table to per-segment rows. */
+    segmentingDimensions?: string[] | null;
     className?: string;
 }
 
@@ -53,8 +58,10 @@ export function ImpactTable({
     amountLadder,
     title = "Full Impact Analysis",
     description,
+    segmentingDimensions,
     className,
 }: ImpactTableProps) {
+    const [breakoutDimension, setBreakoutDimension] = useState<string>("");
     const enabled = !!datasetId && !!modelId && cutoff !== undefined && cutoff !== null;
 
     const { data, isLoading, isFetching, error } = useQuery<SimulateResponse>({
@@ -71,6 +78,34 @@ export function ImpactTable({
         enabled,
         // Treat the first 60s as fresh — same inputs return cached on the
         // server side anyway, so this just avoids client double-requests.
+        staleTime: 60 * 1000,
+    });
+
+    // TASK-11F: per-segment breakout data, fetched only when the user
+    // toggles a dimension via the dropdown.
+    const { data: breakoutData, isFetching: breakoutFetching } = useQuery<{
+        dimension: string;
+        stage: string;
+        segments: Array<{
+            segment_label: string;
+            segment_value: string;
+            n_applications: number;
+            metrics: any;
+        }>;
+    }>({
+        queryKey: ["simulate-breakout", datasetId, modelId, cutoff, amountLadder, breakoutDimension],
+        queryFn: async () => {
+            const res = await api.post("/simulate/breakout", {
+                dataset_id: datasetId,
+                model_id: modelId,
+                cutoff,
+                amount_ladder: amountLadder || null,
+                dimension: breakoutDimension,
+                stage: "policy_cuts_ladder",
+            });
+            return res.data;
+        },
+        enabled: enabled && !!breakoutDimension,
         staleTime: 60 * 1000,
     });
 
@@ -132,7 +167,24 @@ export function ImpactTable({
                     )}
                 </div>
                 <div className="flex items-center gap-2">
-                    {isFetching && (
+                    {/* TASK-11F: segment breakout toggle */}
+                    {segmentingDimensions && segmentingDimensions.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                            <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                            <select
+                                value={breakoutDimension}
+                                onChange={(e) => setBreakoutDimension(e.target.value)}
+                                className="text-xs bg-background border rounded px-2 py-1"
+                                title="Break out the production-equivalent stage by a segmenting dimension"
+                            >
+                                <option value="">No breakout</option>
+                                {segmentingDimensions.map((d) => (
+                                    <option key={d} value={d}>By {d}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+                    {(isFetching || breakoutFetching) && (
                         <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                     )}
                     <button
@@ -152,8 +204,116 @@ export function ImpactTable({
                     {!data.has_dollar_metrics &&
                         " Dollar metrics show as '—' until you tag an approved-amount column on the dataset."}
                 </p>
+
+                {/* TASK-11F: per-segment breakdown (production-equivalent stage) */}
+                {breakoutDimension && breakoutData && (
+                    <SegmentBreakoutPanel data={breakoutData} />
+                )}
+
                 <AuditInfo meta={data.meta} />
             </div>
+        </div>
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// SegmentBreakoutPanel — per-segment metric grid
+// ────────────────────────────────────────────────────────────────────────
+
+function SegmentBreakoutPanel({ data }: {
+    data: {
+        dimension: string;
+        stage: string;
+        segments: Array<{
+            segment_label: string;
+            segment_value: string;
+            n_applications: number;
+            metrics: any;
+        }>;
+    };
+}) {
+    const segments = data.segments;
+    if (!segments.length) {
+        return (
+            <div className="panel p-4 text-sm text-muted-foreground">
+                No data for breakout dimension '{data.dimension}'.
+            </div>
+        );
+    }
+
+    // Sum row for reconciliation visibility (TASK-11B)
+    const totals = {
+        n_applications: segments.reduce((s, r) => s + r.n_applications, 0),
+        approval_count: segments.reduce((s, r) => s + (r.metrics.approval_count || 0), 0),
+        total_approved_dollars: segments.reduce((s, r) => s + (r.metrics.total_approved_dollars || 0), 0),
+        total_predicted_loss_dollars: segments.reduce((s, r) => s + (r.metrics.total_predicted_loss_dollars || 0), 0),
+    };
+
+    return (
+        <div className="border-t pt-4">
+            <div className="flex items-center justify-between mb-3">
+                <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                    Production-equivalent metrics by {data.dimension}
+                </p>
+                <p className="text-2xs text-muted-foreground">
+                    Σ segment metrics = portfolio total (TASK-11B reconciliation rule)
+                </p>
+            </div>
+            <table className="dt text-xs">
+                <thead>
+                    <tr>
+                        <th>{data.dimension}</th>
+                        <th className="text-right">Apps</th>
+                        <th className="text-right">Approvals</th>
+                        <th className="text-right">Approval rate</th>
+                        <th className="text-right">Approved $</th>
+                        <th className="text-right">Predicted loss $</th>
+                        <th className="text-right">Loss rate ($)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {segments.map((seg) => (
+                        <tr key={seg.segment_value}>
+                            <td className="font-medium">{seg.segment_value}</td>
+                            <td className="text-right">
+                                <MetricValue type="count" value={seg.n_applications} />
+                            </td>
+                            <td className="text-right">
+                                <MetricValue type="count" value={seg.metrics.approval_count} />
+                            </td>
+                            <td className="text-right">
+                                <MetricValue type="percent" value={seg.metrics.approval_rate} />
+                            </td>
+                            <td className="text-right">
+                                <MetricValue type="currency" value={seg.metrics.total_approved_dollars} />
+                            </td>
+                            <td className="text-right">
+                                <MetricValue type="currency" value={seg.metrics.total_predicted_loss_dollars} />
+                            </td>
+                            <td className="text-right">
+                                <MetricValue type="percent" value={seg.metrics.predicted_loss_rate_dollars} />
+                            </td>
+                        </tr>
+                    ))}
+                    <tr className="border-t-2 border-foreground/20 font-semibold bg-muted/20">
+                        <td>Total</td>
+                        <td className="text-right">
+                            <MetricValue type="count" value={totals.n_applications} />
+                        </td>
+                        <td className="text-right">
+                            <MetricValue type="count" value={totals.approval_count} />
+                        </td>
+                        <td className="text-right">—</td>
+                        <td className="text-right">
+                            <MetricValue type="currency" value={totals.total_approved_dollars} />
+                        </td>
+                        <td className="text-right">
+                            <MetricValue type="currency" value={totals.total_predicted_loss_dollars} />
+                        </td>
+                        <td className="text-right">—</td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
     );
 }
