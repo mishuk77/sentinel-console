@@ -28,6 +28,7 @@ import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.services.storage import storage
+from app.services.inference_preprocessor import InferencePreprocessor
 from app.core.config import settings
 
 logger = logging.getLogger("sentinel.training")
@@ -186,85 +187,52 @@ class TrainingService:
             self.emit(job_id, "class_balance", "done", "Class distribution acceptable — no rebalancing needed")
 
         # ── 4. Feature Engineering ───────────────────────────
+        # Delegate all preprocessing to InferencePreprocessor so the exact same
+        # transforms can be replayed at inference time. The preprocessor is
+        # saved alongside the model in the artifact (schema_version=2).
         self.emit(job_id, "feature_eng", "running", "Engineering features...")
-        eng_steps = []
+        preprocessor = InferencePreprocessor()
+        X_orig = preprocessor.fit_transform(X_orig, y)
 
-        # Drop high-cardinality categoricals
-        dropped_hi_card = []
-        for col in cat_cols[:]:
-            if X_orig[col].nunique() > 50:
-                X_orig = X_orig.drop(columns=[col])
-                cat_cols.remove(col)
-                dropped_hi_card.append(col)
-                eng_steps.append(f"Dropped high-cardinality: {col}")
-        if dropped_hi_card:
+        # Emit per-step events from the preprocessor's captured state so the
+        # demo-quality pipeline feed remains rich.
+        if preprocessor.dropped_hi_card_cols:
             self.emit(job_id, "feature_eng_card", "done",
-                      f"Dropped {len(dropped_hi_card)} high-cardinality categoricals (>50 unique): {', '.join(dropped_hi_card)}")
+                      f"Dropped {len(preprocessor.dropped_hi_card_cols)} high-cardinality categoricals "
+                      f"(>50 unique): {', '.join(preprocessor.dropped_hi_card_cols)}")
 
-        # Target encoding for remaining categoricals
-        cat_cols_current = X_orig.select_dtypes(include=["object", "string", "category"]).columns.tolist()
-        target_encoded_cols = []
-        if cat_cols_current:
-            for col in cat_cols_current:
-                # Manual target encoding with smoothing to avoid data leakage
-                global_mean = y.mean()
-                smoothing = 10
-                stats = df.groupby(col)[target_col].agg(["mean", "count"])
-                smooth_mean = (stats["count"] * stats["mean"] + smoothing * global_mean) / (stats["count"] + smoothing)
-                X_orig[col] = X_orig[col].map(smooth_mean).fillna(global_mean)
-                target_encoded_cols.append(col)
-            eng_steps.append(f"Target encoded {len(target_encoded_cols)} categorical features with Bayesian smoothing")
+        if preprocessor.target_encoded_cols:
+            global_mean = float(y.mean())
             self.emit(job_id, "feature_eng_encode", "done",
-                      f"Bayesian target encoding applied to {len(target_encoded_cols)} categoricals: "
-                      f"{', '.join(target_encoded_cols)} (smoothing factor={smoothing}, global mean={global_mean:.4f})")
+                      f"Bayesian target encoding applied to {len(preprocessor.target_encoded_cols)} "
+                      f"categoricals: {', '.join(preprocessor.target_encoded_cols)} "
+                      f"(smoothing factor=10, global mean={global_mean:.4f})")
 
-        # Outlier handling — winsorize numeric features at 1st/99th percentile
-        outlier_count = 0
-        cols_with_outliers = 0
-        for col in X_orig.select_dtypes(include=["number"]).columns:
-            col_data = X_orig[col].dropna()
-            if len(col_data) < 10:
-                continue
-            p01, p99 = col_data.quantile(0.01), col_data.quantile(0.99)
-            if p01 == p99:
-                continue
-            n_outliers = ((col_data < p01) | (col_data > p99)).sum()
-            if n_outliers > 0:
-                X_orig[col] = X_orig[col].clip(lower=p01, upper=p99)
-                outlier_count += n_outliers
-                cols_with_outliers += 1
-        if outlier_count > 0:
-            eng_steps.append(f"Winsorized {outlier_count} outlier values at 1st/99th percentiles")
+        if preprocessor._outlier_count > 0:
             self.emit(job_id, "feature_eng_outlier", "done",
-                      f"Winsorized {outlier_count:,} outlier values across {cols_with_outliers} features "
+                      f"Winsorized {preprocessor._outlier_count:,} outlier values across "
+                      f"{preprocessor._cols_with_outliers} features "
                       f"(clipped at 1st/99th percentile boundaries)")
         else:
             self.emit(job_id, "feature_eng_outlier", "done",
                       "No outliers detected beyond 1st/99th percentile thresholds")
 
-        # Fill missing values — median for numeric
-        missing_before = int(X_orig.isnull().sum().sum())
-        if missing_before > 0:
-            for col in X_orig.select_dtypes(include=["number"]).columns:
-                if X_orig[col].isnull().any():
-                    X_orig[col] = X_orig[col].fillna(X_orig[col].median())
-            remaining_missing = int(X_orig.isnull().sum().sum())
-            if remaining_missing > 0:
-                X_orig = X_orig.fillna(0)
-            eng_steps.append(f"Imputed {missing_before} missing values (median for numeric)")
+        if preprocessor._missing_imputed > 0:
             self.emit(job_id, "feature_eng_impute", "done",
-                      f"Imputed {missing_before:,} missing values using median strategy")
+                      f"Imputed {preprocessor._missing_imputed:,} missing values using median strategy")
 
-        # One-hot encode any remaining object columns (shouldn't be many after target encoding)
-        remaining_obj = X_orig.select_dtypes(include=["object", "string"]).columns.tolist()
-        if remaining_obj:
-            X_orig = pd.get_dummies(X_orig, columns=remaining_obj, dummy_na=True)
-            eng_steps.append(f"One-hot encoded {len(remaining_obj)} remaining categorical features")
+        if preprocessor.onehot_columns:
             self.emit(job_id, "feature_eng_onehot", "done",
-                      f"One-hot encoded {len(remaining_obj)} remaining categoricals → {len(X_orig.columns)} total features")
+                      f"One-hot encoded {len(preprocessor.onehot_columns)} remaining categoricals → "
+                      f"{len(preprocessor.final_columns)} total features")
 
         self.emit(job_id, "feature_eng", "done",
                   f"Feature engineering complete — {len(X_orig.columns)} final features")
+
+        # Expose preprocessor state under the variable names the rest of the
+        # function expects (used by ensemble builder and metrics dict).
+        target_encoded_cols = preprocessor.target_encoded_cols
+        outlier_count = preprocessor._outlier_count
 
         # ── 5. Feature Scaling ───────────────────────────────
         self.emit(job_id, "scaling", "running", "Fitting StandardScaler for feature normalization...")
@@ -405,16 +373,27 @@ class TrainingService:
             # Feature importance
             feature_importance = self._compute_feature_importance(name, clf, X.columns)
 
-            # Save artifact
+            # Save artifact (schema_version=2 — includes the preprocessor and
+            # use_scaled flag so inference can replay training preprocessing
+            # exactly. Older artifacts without these fields are still readable
+            # via the legacy code path in decision_service.)
             model_buffer = io.BytesIO()
-            joblib.dump({"model": clf, "scaler": scaler, "columns": list(X.columns)}, model_buffer)
+            joblib.dump({
+                "model": clf,
+                "scaler": scaler,
+                "preprocessor": preprocessor,
+                "use_scaled": use_scaled,
+                "columns": list(X.columns),  # retained for backward-compat & debugging
+                "model_type": name,
+                "schema_version": 2,
+            }, model_buffer)
             artifact_bytes = model_buffer.tell()
             model_buffer.seek(0)
             artifact_key = f"models/{name}_{version_id}.pkl"
             storage.upload_file(model_buffer, artifact_key)
             self.emit(job_id, f"artifact_{name}", "done",
                       f"Serialized {self._display_name(name)} → {artifact_key} "
-                      f"({round(artifact_bytes / 1024, 1)} KB)")
+                      f"({round(artifact_bytes / 1024, 1)} KB · schema v2)")
 
             # Save scored dataset
             scored_data_key = self._save_scored_data(name, version_id, clf,

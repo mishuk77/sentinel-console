@@ -1,12 +1,17 @@
 import pandas as pd
+import numpy as np
 import joblib
 import io
 import os
+import logging
 from sqlalchemy.orm import Session
 from app.models.ml_model import MLModel, ModelStatus
 from app.models.policy import Policy
 from app.services.storage import storage
 from app.services.loan_amount import loan_amount_service
+
+logger = logging.getLogger("sentinel.inference")
+
 
 class DecisionService:
     def __init__(self):
@@ -61,22 +66,75 @@ class DecisionService:
         return []
 
     def _score_model(self, db, model, input_data):
-        """Score a single model and return (score, prepared_df)."""
-        import numpy as np
+        """
+        Score a single model and return (score, prepared_df, classifier).
+
+        Supports three artifact formats:
+
+            * Schema v2 (current) — dict with model + preprocessor + scaler +
+              use_scaled flag. The preprocessor replays training preprocessing
+              identically (target encoding, winsorization, imputation, one-hot)
+              and the scaler is only applied if use_scaled=True. This is the
+              format produced by training.py from 2026-04 onward.
+
+            * Schema v1 (legacy) — dict with model + scaler + columns. The
+              preprocessor was missing and the scaler was applied
+              unconditionally. This caused the LR saturation bug. We keep the
+              code path so old artifacts still produce *some* output (with a
+              warning), but a model registered with this format should be
+              flagged as stale and re-trained.
+
+            * Raw sklearn — a bare model with no preprocessing wrapper.
+        """
         artifact = self._load_model(model)
         df = pd.DataFrame([input_data])
+        algorithm = getattr(model, "algorithm", "unknown")
 
-        # Raw sklearn model
+        # ─── Raw sklearn model (no preprocessing wrapper) ────────
         if hasattr(artifact, "predict_proba"):
             if hasattr(artifact, "feature_names_in_"):
                 df = df.reindex(columns=artifact.feature_names_in_, fill_value=0)
-            score = artifact.predict_proba(df)[0][1]
-            return float(score), df, artifact
+            score = float(artifact.predict_proba(df)[0][1])
+            self._log_inference(model, algorithm, input_data, df.values, None, score, schema="raw")
+            return score, df, artifact
 
         if not isinstance(artifact, dict):
             raise ValueError(f"Unsupported artifact type: {type(artifact)}")
 
-        # Individual model wrapper: {"model": clf, "scaler": scaler, "columns": [...]}
+        # ─── Schema v2: preprocessor + scaler + use_scaled flag ───
+        if artifact.get("schema_version") == 2 and "preprocessor" in artifact:
+            clf = artifact["model"]
+            preprocessor = artifact["preprocessor"]
+            scaler = artifact.get("scaler")
+            use_scaled = artifact.get("use_scaled", False)
+
+            # Apply the SAME preprocessing the model saw at training time
+            X_processed = preprocessor.transform(df)
+
+            # Only apply the scaler if this specific model was trained on scaled
+            # data (LogReg yes, tree models no). This was the second compounding
+            # bug in the legacy code path — the scaler was applied to every
+            # model regardless of whether it was trained on scaled features.
+            if use_scaled and scaler is not None:
+                X_final = pd.DataFrame(
+                    scaler.transform(X_processed),
+                    columns=X_processed.columns,
+                    index=X_processed.index,
+                )
+            else:
+                X_final = X_processed
+
+            score = float(clf.predict_proba(X_final)[0][1])
+
+            self._log_inference(
+                model, algorithm, input_data,
+                X_processed.values, X_final.values, score, schema="v2",
+            )
+            self._warn_if_saturated(model, algorithm, score)
+
+            return score, X_final, clf
+
+        # ─── Schema v1 (legacy): model + scaler + columns ────────
         if "model" in artifact:
             clf = artifact["model"]
             columns = artifact.get("columns")
@@ -85,11 +143,25 @@ class DecisionService:
                 df = df.reindex(columns=columns, fill_value=0)
             elif hasattr(clf, "feature_names_in_"):
                 df = df.reindex(columns=clf.feature_names_in_, fill_value=0)
-            X = scaler.transform(df) if scaler is not None else df
-            score = clf.predict_proba(X)[0][1]
-            return float(score), df, clf
+            try:
+                X = scaler.transform(df) if scaler is not None else df
+            except Exception as e:
+                logger.warning(
+                    "Legacy artifact (model_id=%s, algo=%s) failed scaler.transform: %s. "
+                    "Skipping scaler — predictions may be incorrect. Retrain to fix.",
+                    model.id, algorithm, e,
+                )
+                X = df
+            score = float(clf.predict_proba(X)[0][1])
+            logger.warning(
+                "Legacy schema-v1 artifact in use (model_id=%s, algo=%s, score=%.4f). "
+                "Re-train this model to enable correct preprocessing replay.",
+                model.id, algorithm, score,
+            )
+            self._warn_if_saturated(model, algorithm, score)
+            return score, df, clf
 
-        # Ensemble meta: {"type": ..., "components": [...], "weights": [...]}
+        # ─── Ensemble meta artifact ──────────────────────────────
         if "components" in artifact and "weights" in artifact:
             component_names = artifact["components"]
             weights = artifact["weights"]
@@ -109,6 +181,93 @@ class DecisionService:
             return float(ensemble_score), df, last_clf
 
         raise ValueError(f"Unrecognised artifact dict keys: {list(artifact.keys())}")
+
+    def batch_score(self, db, model, input_rows):
+        """
+        Score many rows in a single call. Used by TASK-8 (Engine Backtest).
+
+        For schema-v2 artifacts this uses preprocessor.transform on a full
+        DataFrame at once, which is dramatically faster than per-row scoring.
+
+        Also runs the saturation sanity check from TASK-1: if 90%+ of the batch
+        falls above 0.95 OR below 0.05, log a WARNING with the batch size and
+        model identifier. This catches model corruption that single-row
+        inference can't detect (it looks normal one row at a time).
+        """
+        artifact = self._load_model(model)
+        algorithm = getattr(model, "algorithm", "unknown")
+
+        df = pd.DataFrame(input_rows) if not isinstance(input_rows, pd.DataFrame) else input_rows.copy()
+
+        if isinstance(artifact, dict) and artifact.get("schema_version") == 2:
+            preprocessor = artifact["preprocessor"]
+            scaler = artifact.get("scaler")
+            use_scaled = artifact.get("use_scaled", False)
+            clf = artifact["model"]
+
+            X_processed = preprocessor.transform(df)
+            if use_scaled and scaler is not None:
+                X_final = pd.DataFrame(
+                    scaler.transform(X_processed),
+                    columns=X_processed.columns,
+                    index=X_processed.index,
+                )
+            else:
+                X_final = X_processed
+
+            scores = clf.predict_proba(X_final)[:, 1]
+        else:
+            # Legacy / fallback — score row-by-row
+            scores = np.array([
+                self._score_model(db, model, row)[0] for row in input_rows
+            ])
+
+        # TASK-1 acceptance criterion: runtime sanity check
+        self._warn_if_batch_saturated(model, algorithm, scores)
+
+        return scores
+
+    def _log_inference(self, model, algorithm, input_data, processed_values,
+                       scaled_values, score, schema):
+        """DEBUG-level diagnostic logging for inference. Disabled in
+        production by default; enable by setting log level to DEBUG."""
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+        logger.debug(
+            "[INFER schema=%s algo=%s model_id=%s] raw=%s processed=%s scaled=%s score=%.6f",
+            schema, algorithm, getattr(model, "id", "?"),
+            input_data, processed_values.tolist() if processed_values is not None else None,
+            scaled_values.tolist() if scaled_values is not None else None,
+            score,
+        )
+
+    def _warn_if_saturated(self, model, algorithm, score):
+        """Per-row saturation warning. Single-row scores at 0.99999 or 0.00001
+        are suspicious enough to log even without batch context."""
+        if score > 0.999 or score < 0.001:
+            logger.warning(
+                "Saturated prediction: model_id=%s algo=%s score=%.6f. "
+                "If many requests show this, the model may be broken.",
+                getattr(model, "id", "?"), algorithm, score,
+            )
+
+    def _warn_if_batch_saturated(self, model, algorithm, scores):
+        """TASK-1 batch sanity check: if 90%+ of a batch is above 0.95 OR below
+        0.05, log a WARNING with batch ID. This catches model breakage that
+        single-row inference can't detect."""
+        n = len(scores)
+        if n == 0:
+            return
+        scores = np.asarray(scores)
+        high_frac = float((scores > 0.95).sum()) / n
+        low_frac = float((scores < 0.05).sum()) / n
+        if high_frac > 0.9 or low_frac > 0.9:
+            batch_id = f"batch_{getattr(model, 'id', '?')[:8]}_{n}"
+            logger.warning(
+                "BATCH SATURATION batch_id=%s model_id=%s algo=%s n=%d "
+                "high_frac=%.3f low_frac=%.3f. Model may be broken — investigate.",
+                batch_id, getattr(model, "id", "?"), algorithm, n, high_frac, low_frac,
+            )
 
     def _determine_fraud_tier(self, fraud_score, tier_config):
         """Determine fraud tier and disposition from score + config."""

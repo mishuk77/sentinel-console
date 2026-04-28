@@ -163,9 +163,23 @@ export default function FraudTiers() {
         }
     });
 
+    // Validation: contiguous + strictly ordered.
+    // Tier boundaries are by definition contiguous (Low's max IS Medium's
+    // min, etc.) — what we have to guard against is degenerate ordering
+    // (boundaries equal to or above their successor) and out-of-range
+    // boundaries (negative or >=1).
+    const tierError = (() => {
+        if (lowMax <= 0 || lowMax >= 1) return "Low/Medium boundary must be between 0 and 1.";
+        if (mediumMax <= 0 || mediumMax >= 1) return "Medium/High boundary must be between 0 and 1.";
+        if (highMax <= 0 || highMax >= 1) return "High/Critical boundary must be between 0 and 1.";
+        if (lowMax >= mediumMax) return "Low/Medium boundary must be below Medium/High boundary.";
+        if (mediumMax >= highMax) return "Medium/High boundary must be below High/Critical boundary.";
+        return null;
+    })();
+
     const handleSave = () => {
-        if (lowMax >= mediumMax || mediumMax >= highMax || highMax >= 1.0) {
-            alert("Invalid thresholds! Ensure: Low < Medium < High < 1.0");
+        if (tierError) {
+            alert(tierError);
             return;
         }
         saveMutation.mutate();
@@ -185,6 +199,28 @@ export default function FraudTiers() {
         fraud_rate: +(bin.actual_rate * 100).toFixed(2),
         count: bin.count,
     })) || [];
+
+    // Empty-tier warnings: count applications that would fall in each tier
+    // given the current score thresholds. If any tier ends up with zero
+    // applications, surface a non-blocking warning so the user knows their
+    // configuration leaves a tier dormant.
+    const tierApplicationCounts = (() => {
+        if (chartData.length === 0) return null;
+        const dCount = chartData.length;
+        const counts: Record<string, number> = { Low: 0, Medium: 0, High: 0, Critical: 0 };
+        for (const bin of chartData) {
+            const score = bin.decile / dCount;
+            const tier = score <= lowMax ? "Low"
+                : score <= mediumMax ? "Medium"
+                : score <= highMax ? "High"
+                : "Critical";
+            counts[tier] += bin.count || 0;
+        }
+        return counts;
+    })();
+    const emptyTiers = tierApplicationCounts
+        ? Object.entries(tierApplicationCounts).filter(([_, n]) => n === 0).map(([t]) => t)
+        : [];
 
     const maxDecile = chartData.length > 0 ? Math.max(...chartData.map(d => d.decile)) : 10;
 
@@ -279,59 +315,83 @@ export default function FraudTiers() {
                                 style={{ width: `${(1 - highMax) * 100}%` }}>Crit</div>
                         </div>
 
-                        {/* Low threshold */}
+                        {/* Low threshold — full 0..1 range, capped only by Medium boundary */}
                         <div>
                             <label className="block text-sm font-medium mb-2">
                                 Low / Medium boundary <span className="text-up font-mono">{lowMax.toFixed(2)}</span>
                             </label>
-                            <input type="range" min="0.1" max="0.5" step="0.05" value={lowMax}
+                            <input type="range" min="0.01" max="0.99" step="0.01" value={lowMax}
                                 onChange={(e) => {
                                     const v = parseFloat(e.target.value);
                                     setLowMax(v);
-                                    if (v >= mediumMax) setMediumMax(Math.min(v + 0.1, 0.9));
-                                    if (v >= highMax) setHighMax(Math.min(v + 0.2, 0.95));
+                                    // Push successor boundaries up if necessary so ordering
+                                    // remains valid; user can fine-tune them afterward.
+                                    if (v >= mediumMax) setMediumMax(Math.min(v + 0.01, 0.99));
+                                    if (v >= highMax) setHighMax(Math.min(v + 0.02, 0.99));
                                 }}
                                 className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-[hsl(var(--primary))]"
                             />
                             <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                                <span>0.10</span><span>0.50</span>
+                                <span>0.01</span><span>0.99</span>
                             </div>
                         </div>
 
-                        {/* Medium threshold */}
+                        {/* Medium threshold — full 0..1 range, must sit between Low and High */}
                         <div>
                             <label className="block text-sm font-medium mb-2">
                                 Medium / High boundary <span className="text-warn font-mono">{mediumMax.toFixed(2)}</span>
                             </label>
-                            <input type="range" min={lowMax + 0.05} max="0.85" step="0.05" value={mediumMax}
+                            <input type="range" min="0.01" max="0.99" step="0.01" value={mediumMax}
                                 onChange={(e) => {
                                     const v = parseFloat(e.target.value);
                                     setMediumMax(v);
-                                    if (v >= highMax) setHighMax(Math.min(v + 0.1, 0.95));
+                                    if (v >= highMax) setHighMax(Math.min(v + 0.01, 0.99));
                                 }}
                                 className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-[hsl(var(--primary))]"
                             />
                             <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                                <span>{(lowMax + 0.05).toFixed(2)}</span><span>0.85</span>
+                                <span>0.01</span><span>0.99</span>
                             </div>
                         </div>
 
-                        {/* High threshold */}
+                        {/* High threshold — full 0..1 range, capped only by 1.0 */}
                         <div>
                             <label className="block text-sm font-medium mb-2">
                                 High / Critical boundary <span className="text-[hsl(25,95%,53%)] font-mono">{highMax.toFixed(2)}</span>
                             </label>
-                            <input type="range" min={mediumMax + 0.05} max="0.95" step="0.05" value={highMax}
+                            <input type="range" min="0.01" max="0.99" step="0.01" value={highMax}
                                 onChange={(e) => setHighMax(parseFloat(e.target.value))}
                                 className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-[hsl(var(--primary))]"
                             />
                             <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                                <span>{(mediumMax + 0.05).toFixed(2)}</span><span>0.95</span>
+                                <span>0.01</span><span>0.99</span>
                             </div>
                         </div>
+
+                        {/* Validation feedback */}
+                        {tierError && (
+                            <div className="flex items-start gap-2 p-3 rounded bg-down/5 border border-down/30">
+                                <ShieldAlert className="h-4 w-4 text-down shrink-0 mt-0.5" />
+                                <p className="text-xs text-down">{tierError}</p>
+                            </div>
+                        )}
+
+                        {/* Non-blocking empty-tier warning */}
+                        {!tierError && emptyTiers.length > 0 && (
+                            <div className="flex items-start gap-2 p-3 rounded bg-warn/5 border border-warn/30">
+                                <Info className="h-4 w-4 text-warn shrink-0 mt-0.5" />
+                                <p className="text-xs text-warn">
+                                    {emptyTiers.length === 1 ? (
+                                        <>The <span className="font-semibold">{emptyTiers[0]}</span> tier covers a score range with zero applications. Consider adjusting boundaries.</>
+                                    ) : (
+                                        <>Tiers <span className="font-semibold">{emptyTiers.join(", ")}</span> cover score ranges with zero applications. Consider adjusting boundaries.</>
+                                    )}
+                                </p>
+                            </div>
+                        )}
                     </div>
 
-                    <button onClick={handleSave} disabled={saveMutation.isPending}
+                    <button onClick={handleSave} disabled={saveMutation.isPending || !!tierError}
                         className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-50">
                         <Save className="h-4 w-4" />
                         {saveMutation.isPending ? "Saving..." : "Save Configuration"}
