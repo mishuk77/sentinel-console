@@ -1,7 +1,25 @@
 # Sentinel Console — Session Handoff Document
 
 **Created:** 2026-04-09
+**Last updated:** 2026-04-28 (post-demo sprint)
 **Purpose:** Complete project context for continuing development in a new Claude Code session on another machine. Read this file at the start of a new conversation to restore full context.
+
+## Post-Demo Sprint Status (2026-04-28)
+
+A multi-week post-demo iteration sprint was executed across 12+ commits.
+See `docs/sprint-completion.md` for full task-by-task status and the
+deferred-work backlog. Headline:
+
+  - **103 backend tests passing** (was 0 — full pytest infrastructure built)
+  - LR inference saturation bug fixed at root cause (TASK-1)
+  - Deterministic portfolio simulation engine with reconciliation tests (TASK-3, TASK-11B)
+  - Three-stage Exposure Control table with audit metadata + CSV export
+  - Engine Backtest MVP — production code path, row-level drill-down (TASK-8)
+  - Three-layer health guardrail framework with H1-H6 checks (TASK-9, TASK-10 L1+L2)
+  - Outcome flag and 3-mode loss handling refactor (TASK-6)
+  - Cross-cutting MetricValue, ComparisonTable, AuditInfo components (TASK-11A/C)
+  - Draft / published policy state machine (TASK-11E)
+  - Deletion protection on datasets referenced by backtests (TASK-11D)
 
 ---
 

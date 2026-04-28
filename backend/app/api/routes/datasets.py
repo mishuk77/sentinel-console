@@ -451,17 +451,33 @@ def delete_dataset(
         Dataset.id == dataset_id,
         DecisionSystem.client_id == current_user.client_id
     ).first()
-    
+
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
-        
+
+    # TASK-11D: deletion protection. Datasets referenced by any persisted
+    # backtest run cannot be deleted — only archived (status=INVALID
+    # serves as our archived marker for the MVP). The check is by foreign
+    # key, so we don't need to manually walk relationships.
+    from app.models.backtest import BacktestRun
+    in_use_run = db.query(BacktestRun).filter(BacktestRun.dataset_id == dataset_id).first()
+    if in_use_run:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot delete: dataset is referenced by backtest run "
+                f"{in_use_run.id[:8]} (started {in_use_run.started_at}). "
+                f"Archive instead, or delete the backtest first."
+            ),
+        )
+
     try:
-        # Note: We are NOT deleting from S3 mainly to avoid 'boto3' permission complexity 
+        # Note: We are NOT deleting from S3 mainly to avoid 'boto3' permission complexity
         # or errors blocking the DB delete.
         db.delete(dataset)
         db.commit()
     except Exception as e:
         print(f"Delete failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete dataset")
-        
+
     return {"message": "Dataset deleted"}
