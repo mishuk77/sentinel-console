@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useParams, Link } from "react-router-dom";
 import { useSystem } from "@/lib/hooks";
@@ -136,6 +136,16 @@ export default function Policy() {
         enabled: !!systemId
     });
 
+    // TASK-2: fetch policies so we can show 'Last saved' on the active one.
+    const { data: policies } = useQuery<any[]>({
+        queryKey: ["policies", systemId],
+        queryFn: async () => {
+            const res = await api.get("/policies/", { params: { system_id: systemId } });
+            return res.data;
+        },
+        enabled: !!systemId,
+    });
+
     const selectedModel = models?.find(m => m.id === selectedModelId);
 
     const analysis = useMemo(() => {
@@ -181,6 +191,21 @@ export default function Policy() {
         for (let i = 0; i < bins.length; i++) if (bins[i].pavBadRate >= threshold) return Math.max(0, i - 1);
         return bins.length - 1;
     };
+    // TASK-2 Issue 2B: pre-populate slider from saved active policy threshold
+    // so page reloads don't lose the user's last saved cutoff.
+    const bandFromScore = (savedScore: number) => {
+        if (!bins.length) return 0;
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let i = 0; i < bins.length; i++) {
+            const d = Math.abs(((bins[i] as any).score ?? 0) - savedScore);
+            if (d < bestDist) {
+                bestDist = d;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
+    };
 
     const currentBin = bins[cutoffBandIdx] ?? null;
     const approvalPct = currentBin ? Math.round(currentBin.cumPct) : 0;
@@ -195,6 +220,20 @@ export default function Policy() {
     const approvalRate = analysis ? approvedPop / analysis.totalPop : 0;
     const approvedBadRate = approvedPop > 0 ? approvedBads / approvedPop * 100 : 0;
     const rejectedBadRate = rejectedPop > 0 ? rejectedBads / rejectedPop * 100 : 0;
+
+    // TASK-2 Issue 2B: when bins load AND there's a saved active policy
+    // threshold, sync the slider position to it. Tracks whether we've
+    // already done the initial sync so we don't fight user adjustments.
+    const initialSyncDoneRef = useRef(false);
+    useEffect(() => {
+        if (initialSyncDoneRef.current) return;
+        if (!bins.length) return;
+        const savedThreshold = (system as any)?.active_policy_summary?.threshold;
+        if (savedThreshold !== undefined && savedThreshold !== null) {
+            setCutoffBandIdx(bandFromScore(savedThreshold));
+            initialSyncDoneRef.current = true;
+        }
+    }, [bins, system]);
 
     useEffect(() => {
         if (!models) return;
@@ -401,6 +440,22 @@ export default function Policy() {
                                             value={policyName}
                                             onChange={(e) => setPolicyName(e.target.value)}
                                         />
+                                        {/* TASK-2 acceptance: visible 'Last saved' timestamp */}
+                                        {(() => {
+                                            const activePolicy = policies?.find((p: any) => p.is_active);
+                                            const ts = activePolicy?.last_published_at;
+                                            if (!ts) return null;
+                                            const formatted = new Date(ts).toLocaleString(undefined, {
+                                                year: "numeric", month: "short", day: "2-digit",
+                                                hour: "2-digit", minute: "2-digit",
+                                            });
+                                            return (
+                                                <p className="text-xs text-muted-foreground mb-3 flex items-center gap-1.5">
+                                                    <CheckCircle className="h-3 w-3 text-up" />
+                                                    Last saved: <span className="font-medium text-foreground">{formatted}</span>
+                                                </p>
+                                            );
+                                        })()}
                                         <button
                                             onClick={() => activateMutation.mutate()}
                                             disabled={activateMutation.isPending}

@@ -36,6 +36,11 @@ class PolicyResponse(BaseModel):
     target_decile: Optional[int] = None
     amount_ladder: Optional[dict] = None
     is_active: bool
+    # TASK-11E / TASK-2: surface state and audit fields so the UI can show
+    # "Last saved" / "Published" indicators.
+    state: Optional[str] = None
+    last_published_at: Optional[str] = None
+    published_by: Optional[str] = None
 
     model_config = {"protected_namespaces": (), "from_attributes": True}
 
