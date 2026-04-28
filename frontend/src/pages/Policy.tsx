@@ -8,6 +8,7 @@ import {
     Scale, Check, AlertTriangle, Trash2, AlertCircle, X, ArrowRight,
     CheckCircle, Layers, Plus, ChevronRight, ChevronLeft, RefreshCw, Info
 } from "lucide-react";
+import { PolicyDiff } from "@/components/simulation/PolicyDiff";
 import { Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea, ComposedChart, Line, ReferenceLine } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -126,6 +127,7 @@ export default function Policy() {
     const [isDragging, setIsDragging] = useState(false);
     const [policyName, setPolicyName] = useState("Proactive Risk Policy");
     const [activationSuccess, setActivationSuccess] = useState(false);
+    const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
 
     const { data: models } = useQuery<MLModel[]>({
         queryKey: ["models", systemId],
@@ -457,7 +459,16 @@ export default function Policy() {
                                             );
                                         })()}
                                         <button
-                                            onClick={() => activateMutation.mutate()}
+                                            onClick={() => {
+                                                // TASK-11E: show impact summary modal before publishing
+                                                // when there's an existing published policy. First-time
+                                                // activation has nothing to compare against, so go direct.
+                                                if ((system as any)?.active_policy_summary) {
+                                                    setPublishConfirmOpen(true);
+                                                } else {
+                                                    activateMutation.mutate();
+                                                }
+                                            }}
                                             disabled={activateMutation.isPending}
                                             className={cn(
                                                 "w-full inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors h-10 px-4 py-2",
@@ -466,7 +477,7 @@ export default function Policy() {
                                                     : "bg-primary text-primary-foreground hover:bg-primary/90"
                                             )}
                                         >
-                                            {activateMutation.isPending ? "Processing..." : activationSuccess ? "Success!" : system?.active_policy_summary ? "Update Policy" : "Activate Policy"}
+                                            {activateMutation.isPending ? "Processing..." : activationSuccess ? "Success!" : (system as any)?.active_policy_summary ? "Review & Publish" : "Activate Policy"}
                                             {activationSuccess && <Check className="ml-2 h-4 w-4" />}
                                         </button>
                                     </div>
@@ -763,6 +774,76 @@ export default function Policy() {
                         datasetId={selectedModel?.dataset_id}
                     />
                 </>
+            )}
+
+            {/* TASK-11E: publish confirmation modal with impact summary */}
+            {publishConfirmOpen && selectedModel && currentBin && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="panel max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="panel-head sticky top-0 bg-card z-10">
+                            <div>
+                                <span className="panel-title">Review & publish policy</span>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                    Compare your proposed cutoff against the currently published policy.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setPublishConfirmOpen(false)}
+                                className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <div className="bg-info/5 border border-info/20 rounded p-3 text-sm">
+                                <p>
+                                    Proposed cutoff: <span className="font-mono font-bold">{(currentBin.score ?? 0).toFixed(4)}</span>
+                                    <span className="mx-2 text-muted-foreground">·</span>
+                                    Current published cutoff:{" "}
+                                    <span className="font-mono font-bold">
+                                        {((system as any)?.active_policy_summary?.threshold ?? 0).toFixed(4)}
+                                    </span>
+                                </p>
+                            </div>
+
+                            {/* PolicyDiff: shows newly approved / newly denied applicants */}
+                            <PolicyDiff
+                                datasetId={selectedModel.dataset_id}
+                                modelId={selectedModel.id}
+                                policyA={{
+                                    cutoff: (system as any)?.active_policy_summary?.threshold ?? 0,
+                                    label: "Currently published",
+                                }}
+                                policyB={{
+                                    cutoff: currentBin.score ?? 0,
+                                    label: "Proposed",
+                                }}
+                                title="Impact of this change"
+                                skipIfIdentical={false}
+                            />
+
+                            <div className="flex items-center justify-end gap-2 pt-3 border-t">
+                                <button
+                                    onClick={() => setPublishConfirmOpen(false)}
+                                    className="btn-ghost btn-sm"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setPublishConfirmOpen(false);
+                                        activateMutation.mutate();
+                                    }}
+                                    disabled={activateMutation.isPending}
+                                    className="btn-primary btn-sm flex items-center gap-1.5"
+                                >
+                                    <Check className="h-3.5 w-3.5" />
+                                    Confirm publish
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

@@ -322,7 +322,22 @@ def get_segment_columns(
             os.remove(temp_path)
 
     metadata = dataset.metadata_info or {}
-    label_col = metadata.get("label_column", "charge_off")
+    # TASK-6: prefer the explicit target column from the most recent model
+    # trained on this dataset; fall back to the dataset's label_column;
+    # then to the legacy 'charge_off' default for very old data.
+    from app.models.ml_model import MLModel
+    latest_model = (
+        db.query(MLModel)
+        .filter(MLModel.dataset_id == dataset.id)
+        .filter(MLModel.target_column.isnot(None))
+        .order_by(MLModel.created_at.desc())
+        .first()
+    )
+    label_col = (
+        (latest_model.target_column if latest_model else None)
+        or metadata.get("label_column")
+        or "charge_off"
+    )
 
     # Column name fragments that indicate non-segment fields
     exclude_fragments = [

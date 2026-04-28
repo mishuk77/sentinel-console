@@ -428,9 +428,21 @@ async def get_segment_calibration(
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-    # ── Determine label column ────────────────────────────────────────────────
+    # ── Determine label column (TASK-6: prefer model.target_column) ────────────
+    from app.models.ml_model import MLModel
     metadata = dataset.metadata_info or {}
-    label_col = metadata.get("label_column", "charge_off")
+    latest_model = (
+        db.query(MLModel)
+        .filter(MLModel.dataset_id == dataset.id)
+        .filter(MLModel.target_column.isnot(None))
+        .order_by(MLModel.created_at.desc())
+        .first()
+    )
+    label_col = (
+        (latest_model.target_column if latest_model else None)
+        or metadata.get("label_column")
+        or "charge_off"
+    )
     if label_col not in df.columns:
         for candidate in ["charge_off", "default", "label", "target", "is_default"]:
             if candidate in df.columns:
@@ -533,9 +545,21 @@ async def calibrate_segments(
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-    # ── Determine label column ────────────────────────────────────────────────
+    # ── Determine label column (TASK-6: prefer model.target_column) ────────────
+    from app.models.ml_model import MLModel
     metadata = dataset.metadata_info or {}
-    label_col = metadata.get("label_column", "charge_off")
+    latest_model = (
+        db.query(MLModel)
+        .filter(MLModel.dataset_id == dataset.id)
+        .filter(MLModel.target_column.isnot(None))
+        .order_by(MLModel.created_at.desc())
+        .first()
+    )
+    label_col = (
+        (latest_model.target_column if latest_model else None)
+        or metadata.get("label_column")
+        or "charge_off"
+    )
     if label_col not in df.columns:
         for candidate in ["charge_off", "default", "label", "target", "is_default"]:
             if candidate in df.columns:
