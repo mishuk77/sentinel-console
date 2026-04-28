@@ -8,6 +8,7 @@ import {
     DollarSign, AlertTriangle, Sparkles, RefreshCw, TrendingDown,
     Shield, ArrowRight, Check, Info, ArrowLeft, CheckCircle
 } from "lucide-react";
+import { ImpactTable } from "@/components/simulation/ImpactTable";
 import { cn } from "@/lib/utils";
 import {
     ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
@@ -347,6 +348,18 @@ export default function ExposureControl() {
                     </div>
                 </div>
             </div>
+
+            {/* TASK-3: Full Impact Table — 3 stages × 10 metrics + delta column */}
+            {activeModel?.dataset_id && activePolicy?.threshold !== undefined && (
+                <ImpactTable
+                    datasetId={activeModel.dataset_id}
+                    modelId={activeModel.id}
+                    cutoff={activePolicy.threshold}
+                    amountLadder={amountLadder}
+                    title="Full Impact Analysis"
+                    description="Baseline → policy cuts → policy + amount ladder. All three stages on the same population, predicted loss computed from the model."
+                />
+            )}
 
             {/* Main Content */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

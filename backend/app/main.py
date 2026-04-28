@@ -98,6 +98,11 @@ def startup_event():
             "amount_ladder": "JSON",
             "is_active": "BOOLEAN DEFAULT FALSE",
             "decision_system_id": "VARCHAR",
+            # TASK-11E: explicit policy state machine
+            "state": "VARCHAR DEFAULT 'draft'",
+            "last_published_at": "TIMESTAMP",
+            "published_by": "VARCHAR",
+            "published_snapshot": "JSON",
         }
         for col_name, col_type in policy_migrations.items():
             if col_name not in columns:
@@ -142,6 +147,25 @@ def startup_event():
                     conn.execute(text(f"ALTER TABLE datasets ADD COLUMN {col_name} {col_type}"))
                     conn.commit()
                 print(f"MIGRATION: '{col_name}' column added.")
+
+    # TASK-11E: backfill the new policies.state field from is_active.
+    # is_active=True → 'published' (active production rule)
+    # is_active=False → 'archived' (historical record)
+    # Newly created policies will default to 'draft' via the model.
+    if "policies" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("policies")]
+        if "state" in columns:
+            with engine.connect() as conn:
+                # Only backfill rows that don't have a state yet (NULL)
+                result = conn.execute(text(
+                    "UPDATE policies SET state = CASE "
+                    "WHEN is_active = TRUE THEN 'published' "
+                    "ELSE 'archived' END "
+                    "WHERE state IS NULL"
+                ))
+                conn.commit()
+                if result.rowcount:
+                    print(f"MIGRATION: Backfilled state on {result.rowcount} policy rows.")
 
     Base.metadata.create_all(bind=engine)
     print("Database schema initialized.")

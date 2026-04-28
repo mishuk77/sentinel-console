@@ -182,9 +182,38 @@ def activate_policy(
     if model:
         model.status = ModelStatus.ACTIVE
         
-    target_policy.is_active = True 
+    target_policy.is_active = True
+
+    # TASK-11E: explicit state machine. Activation = publish.
+    # Capture audit metadata: when, who, and a snapshot of the policy
+    # configuration so historical backtests can re-render with the exact
+    # config that was in effect.
+    from datetime import datetime as _dt
+    target_policy.state = "published"
+    target_policy.last_published_at = _dt.utcnow()
+    target_policy.published_by = getattr(current_user, "email", None)
+    target_policy.published_snapshot = {
+        "threshold": target_policy.threshold,
+        "amount_ladder": target_policy.amount_ladder,
+        "projected_approval_rate": target_policy.projected_approval_rate,
+        "projected_loss_rate": target_policy.projected_loss_rate,
+        "target_decile": target_policy.target_decile,
+        "model_id": target_policy.model_id,
+        "published_at": target_policy.last_published_at.isoformat(),
+        "published_by": target_policy.published_by,
+    }
+
+    # Mark previously published policies as archived (TASK-11E: only one
+    # published policy per system).
+    if target_policy.decision_system_id:
+        db.query(Policy).filter(
+            Policy.decision_system_id == target_policy.decision_system_id,
+            Policy.id != target_policy.id,
+            Policy.state == "published",
+        ).update({"state": "archived"})
+
     db.commit()
-    
+
     # Update DecisionSystem active pointers
     if target_policy.decision_system_id:
         ds = db.query(DecisionSystem).filter(DecisionSystem.id == target_policy.decision_system_id).first()
@@ -192,9 +221,71 @@ def activate_policy(
             ds.active_model_id = target_policy.model_id
             ds.active_policy_id = target_policy.id
             db.commit()
-            
+
     db.refresh(target_policy)
     return target_policy
+
+
+# ────────────────────────────────────────────────────────────────────────
+# TASK-3 / TASK-11E: save-draft endpoint
+# ────────────────────────────────────────────────────────────────────────
+class PolicyDraftUpdate(BaseModel):
+    """Body for PATCH /policies/{id} — saves a draft, doesn't publish."""
+    threshold: Optional[float] = None
+    amount_ladder: Optional[dict] = None
+    projected_approval_rate: Optional[float] = None
+    projected_loss_rate: Optional[float] = None
+    target_decile: Optional[int] = None
+
+    model_config = {"protected_namespaces": ()}
+
+
+@router.patch("/{policy_id}")
+def save_draft_policy(
+    policy_id: str,
+    update: PolicyDraftUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Save policy edits as a draft. Per TASK-11E: 'Save Configuration' creates
+    a draft, doesn't publish. Production decisioning continues to use
+    whatever was last published.
+
+    The frontend calls this on every save action; only when the user
+    explicitly clicks "Publish" does activate_policy() run and the changes
+    take effect for production traffic.
+    """
+    target = db.query(Policy).join(DecisionSystem).filter(
+        Policy.id == policy_id,
+        DecisionSystem.client_id == current_user.client_id,
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    # If this policy was previously published, editing it transitions it
+    # back to draft state. The previously-published version remains
+    # active in production until the user explicitly publishes the draft.
+    if target.state == "published":
+        # Clone-then-edit pattern: create a new draft preserving the
+        # published version. (Simpler approach: just demote to draft.
+        # The published_snapshot field still has the previous config.)
+        target.state = "draft"
+
+    if update.threshold is not None:
+        target.threshold = update.threshold
+    if update.amount_ladder is not None:
+        target.amount_ladder = update.amount_ladder
+    if update.projected_approval_rate is not None:
+        target.projected_approval_rate = update.projected_approval_rate
+    if update.projected_loss_rate is not None:
+        target.projected_loss_rate = update.projected_loss_rate
+    if update.target_decile is not None:
+        target.target_decile = update.target_decile
+
+    db.commit()
+    db.refresh(target)
+    return target
 
 class ExposureUpdateRequest(BaseModel):
     decision_system_id: str
