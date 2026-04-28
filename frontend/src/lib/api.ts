@@ -46,7 +46,13 @@ export interface Dataset {
         row_count?: number;
         columns?: string[];
         location?: string;
+        label_column?: string;
     };
+    // TASK-6 column annotations
+    approved_amount_column?: string | null;
+    loss_amount_column?: string | null;
+    id_column?: string | null;
+    segmenting_dimensions?: string[] | null;
     created_at: string;
 }
 

@@ -3,8 +3,9 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dataset } from "@/lib/api";
 import { api } from "@/lib/api";
-import { Loader2, FileText, Upload, AlertCircle, Trash2, Play, ChevronDown, Settings2, Download } from "lucide-react";
+import { Loader2, FileText, Upload, AlertCircle, Trash2, Play, ChevronDown, Settings2, Download, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ColumnAnnotationEditor } from "@/components/datasets/ColumnAnnotationEditor";
 
 export default function Datasets() {
     const { systemId } = useParams<{ systemId: string }>();
@@ -14,6 +15,7 @@ export default function Datasets() {
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [labelColumn, setLabelColumn] = useState<string>("");
     const [pendingFile, setPendingFile] = useState<File | null>(null);
+    const [editingDataset, setEditingDataset] = useState<Dataset | null>(null);
 
     // Fetch Datasets
     const { data: datasets, isLoading } = useQuery<Dataset[]>({
@@ -248,6 +250,8 @@ export default function Datasets() {
                                 <th>Rows</th>
                                 <th>Status</th>
                                 <th>Uploaded At</th>
+                                <th>Loss mode</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -280,8 +284,31 @@ export default function Datasets() {
                                     <td className="text-2xs text-muted-foreground">
                                         {new Date(ds.created_at).toLocaleDateString()} <span className="mx-1 text-muted-foreground/30">|</span> {new Date(ds.created_at).toLocaleTimeString()}
                                     </td>
+                                    <td>
+                                        {/* TASK-6: surface the active loss-mode badge */}
+                                        {ds.loss_amount_column ? (
+                                            <span className="badge badge-blue text-xs" title={`Loss column: ${ds.loss_amount_column}`}>
+                                                Mode 1
+                                            </span>
+                                        ) : ds.approved_amount_column ? (
+                                            <span className="badge badge-green text-xs" title={`Amount column: ${ds.approved_amount_column}`}>
+                                                Mode 2
+                                            </span>
+                                        ) : (
+                                            <span className="badge badge-muted text-xs" title="No dollar metrics — click the tag icon to annotate">
+                                                Mode 3
+                                            </span>
+                                        )}
+                                    </td>
                                     <td className="text-right">
                                         <div className="flex items-center justify-end gap-1">
+                                            <button
+                                                onClick={() => setEditingDataset(ds)}
+                                                className="text-muted-foreground hover:text-info transition-colors p-2 rounded-full hover:bg-info/10"
+                                                title="Tag columns (TASK-6)"
+                                            >
+                                                <Tag className="h-4 w-4" />
+                                            </button>
                                             <button
                                                 onClick={async () => {
                                                     try {
@@ -321,6 +348,15 @@ export default function Datasets() {
                     </table>
                 )}
             </div>
+
+            {/* TASK-6: column annotation editor modal */}
+            {editingDataset && (
+                <ColumnAnnotationEditor
+                    dataset={editingDataset}
+                    open={true}
+                    onClose={() => setEditingDataset(null)}
+                />
+            )}
         </div >
     );
 }
