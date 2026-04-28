@@ -2,9 +2,9 @@
 
 **Sprint:** sprint_spec_post_demo-2.md
 **Started:** 2026-04-28
-**Commits:** 12
-**Backend tests:** 0 → 90 passing
-**Files changed:** ~40 across backend + frontend
+**Commits:** 17 (12 in initial run + 5 in resume)
+**Backend tests:** 0 → 110 passing
+**Files changed:** ~50 across backend + frontend
 
 ## Sprint Status by Task
 
@@ -15,21 +15,21 @@
 | **TASK-3** Exposure Control full impact table | ✅ Complete | 3 stages × 10 metrics, ComparisonTable, audit info, CSV export |
 | **TASK-4** Segmentation cascade + UI banner | ✅ Complete (4A, 4B) · Partial (4C) | Cascade resolver + 13 tests + banner. Per-segment row tags + portfolio totals are TASK-11F polish |
 | **TASK-5** Remove fraud tier boundary caps | ✅ Complete | Full 0.01-0.99 range, validation, empty-tier warning |
-| **TASK-6** Outcome flag + 3-mode loss handling | ✅ Complete (backend) · UI follow-up | Schema + service + 16 tests + dataset metadata endpoint. Frontend column-annotation editor in next iteration |
+| **TASK-6** Outcome flag + 3-mode loss handling | ✅ Complete (resume session) | Backend in main sprint; `<ColumnAnnotationEditor />` modal added in resume session — Datasets page now shows mode badge per row + tag icon to edit |
 | **TASK-7** Projected Simulation Summary | ✅ Complete | Three-column page with Score Distribution + Lift Summary, reuses ImpactTable |
-| **TASK-8** Engine Backtest | ✅ MVP Complete · Async + Parquet deferred | Full production code path, row-level drill-down, calibration view, audit trail. Synchronous execution (async pattern is next iteration). First 1000 rows in DB; S3 Parquet for full results is the follow-up |
+| **TASK-8** Engine Backtest | ✅ MVP + async + batch SHAP (resume session) | Full production code path, row-level drill-down with per-row SHAP top-3 reasons (TreeExplainer batch ~100x faster than per-row), calibration view, audit trail. Now async via Celery — endpoint returns immediately, frontend polls. S3 Parquet for >1000 rows still deferred |
 | **TASK-9** Calibration check on registration | ✅ Complete (consolidated into Layer 2) | Per spec note — TASK-9 ran as Layer 2's H5 |
 | **TASK-10 L1** Training-time validation | ✅ Complete | Health checks run after fit; FAIL blocks artifact write |
 | **TASK-10 L2** Registration-time validation | ✅ Complete | Health checks fire on policy activate; FAIL blocks publish |
-| **TASK-10 L3** Runtime monitoring | ⏳ Deferred | Celery beat + Redis sliding window not yet wired. Foundation (InferenceHealthChecker) is in place |
+| **TASK-10 L3** Runtime monitoring | ✅ Complete (resume session) | Redis rolling window + Celery beat task @ 5min, `runtime_health_status` on DecisionSystem, push hook in decision_service |
 | **TASK-11A** MetricValue component | ✅ Complete | Currency / percent / count / pp formats with parentheses-for-negatives, hover full-precision tooltips |
 | **TASK-11B** Reconciliation tests | ✅ Complete | 21 tests cover every math invariant (avg×count=total, baseline+Δ=final, etc.) |
 | **TASK-11C** Audit metadata | ✅ Complete | AuditInfo collapsible panel; every simulation/backtest response includes meta block |
 | **TASK-11D** Reproducibility hardening | ✅ Partial | Policy snapshots, model artifact pinning, dataset content hash, engine_version, deletion protection on datasets referenced by backtests. Schema-version + legacy-render shim deferred |
 | **TASK-11E** Draft / published policy states | ✅ Complete | state enum + last_published_at + published_by + published_snapshot. Singleton-published per system |
-| **TASK-11F** Segment breakouts toggle | ⏳ Deferred | Backend `dataset.segmenting_dimensions` field exists; toggle UI not yet built |
-| **TASK-11G** "What changed" diff view | ⏳ Deferred | Foundation in place (decisions are determinable from the simulation) |
-| **TASK-11H** Compare to prior policy | ⏳ Deferred | published_snapshot is captured; UI toggle not yet built |
+| **TASK-11F** Segment breakouts toggle | ✅ Complete (resume session) | `break_out_by_dimension()` engine + `/simulate/breakout` endpoint + ImpactTable dropdown + 10 reconciliation tests |
+| **TASK-11G** "What changed" diff view | ✅ Complete (resume session) | `diff_policies()` engine + `/simulate/diff` endpoint + `<PolicyDiff />` component + 10 tests, wired into ExposureControl |
+| **TASK-11H** Compare to prior policy | ✅ Complete (resume session) | Same component as TASK-11G — pass `published_snapshot` as policy_a |
 | **TASK-11I** Export format standards | ✅ Partial | CSV exports for ImpactTable already include metadata header (TASK-11I-compliant). Filenames already follow `sentinel_{type}_{id}_{ts}` convention. PDF cover/footer is the next iteration |
 
 ## Architectural Foundations Now in Place
@@ -142,7 +142,7 @@ These decisions inform the deferred work:
 
 ## Test Coverage
 
-Total backend tests: **90 passing**
+Total backend tests: **110 passing**
 
 | File | Tests | Focus |
 |------|-------|-------|
@@ -152,8 +152,10 @@ Total backend tests: **90 passing**
 | test_portfolio_simulation.py | 21 | Math invariants, reconciliation rules, determinism |
 | test_segment_cascade.py | 13 | Cascade rules, override precedence, filter operators |
 | test_inference_health.py | 23 | H1-H6 PASS/WARN/FAIL cases, run_all aggregation |
+| test_policy_diff.py | 10 | TASK-11G/H — diff buckets, dollar reconciliation, ID capping |
+| test_segment_breakout.py | 10 | TASK-11F — Σ segments == portfolio reconciliation rule |
 
-TASK-8 backtest endpoint integration tests are a deferred follow-up
+TASK-8 backtest endpoint integration tests are still deferred
 (the underlying scoring path is exercised by the LR + preprocessor
 tests and the full pipeline runs cleanly end-to-end).
 
