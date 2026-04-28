@@ -79,6 +79,13 @@ export default function EngineBacktest() {
             return res.data;
         },
         enabled: !!activeRunId,
+        // TASK-8 async: poll while the run is in flight, stop polling
+        // once it completes or fails
+        refetchInterval: (query) => {
+            const status = query.state.data?.status;
+            if (status === "running" || status === "pending") return 2000;
+            return false;
+        },
     });
 
     const startMutation = useMutation({
@@ -325,6 +332,7 @@ function RunDetail({ run, onClose }: { run: BacktestSummary; onClose: () => void
                                 <th>Decision</th>
                                 <th className="text-right">Approved $</th>
                                 <th>Outcome</th>
+                                <th>Top reasons (SHAP)</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -347,6 +355,26 @@ function RunDetail({ run, onClose }: { run: BacktestSummary; onClose: () => void
                                             : row.actual_outcome === 1
                                             ? <span className="text-down">bad</span>
                                             : <span className="text-up">good</span>}
+                                    </td>
+                                    <td>
+                                        {row.shap_top_features && row.shap_top_features.length > 0 ? (
+                                            <div className="flex flex-col gap-0.5 text-xs">
+                                                {row.shap_top_features.slice(0, 3).map((f: any, idx: number) => (
+                                                    <span key={idx} className="font-mono text-2xs">
+                                                        <span className={cn(
+                                                            "inline-block w-1.5 h-1.5 rounded-full mr-1",
+                                                            f.value > 0 ? "bg-down" : "bg-up",
+                                                        )} />
+                                                        {f.feature}
+                                                        <span className="text-muted-foreground ml-1">
+                                                            ({f.value > 0 ? "+" : ""}{f.value.toFixed(3)})
+                                                        </span>
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <span className="text-muted-foreground text-2xs">—</span>
+                                        )}
                                     </td>
                                 </tr>
                             ))}

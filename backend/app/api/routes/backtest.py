@@ -122,8 +122,16 @@ def start_backtest(
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    """Start (and synchronously run) a backtest. Returns the run summary
-    once complete."""
+    """Start a backtest run.
+
+    The actual work is dispatched to a Celery worker so the HTTP request
+    returns immediately with run_id + status='running'. Frontend polls
+    GET /backtest/{run_id} for status updates until status='completed'
+    or 'failed'.
+
+    Falls back to synchronous execution when Redis/Celery is unavailable
+    (local dev) — the run still completes; the response just blocks until
+    it does."""
     # Tenant ownership
     ds = db.query(DecisionSystem).filter(
         DecisionSystem.id == req.decision_system_id,
@@ -185,19 +193,34 @@ def start_backtest(
     )
     db.add(run)
     db.commit()
+    run_id = run.id
 
-    # Run the backtest synchronously
+    # Dispatch to Celery worker. If Celery isn't reachable (e.g. local
+    # dev with no Redis), fall back to synchronous execution so the
+    # endpoint still returns a valid result.
+    dispatched = False
     try:
-        _execute_backtest(db, run, dataset, model, policy)
-        run.status = "completed"
-        run.completed_at = datetime.utcnow()
+        from app.workers.backtest_worker import run_backtest_task
+        run_backtest_task.delay(run_id)
+        dispatched = True
     except Exception as e:
-        tb = traceback.format_exc()
-        run.status = "failed"
-        run.completed_at = datetime.utcnow()
-        run.error_message = f"{type(e).__name__}: {e}\n{tb[:500]}"
-    db.commit()
-    db.refresh(run)
+        # No Celery — run synchronously
+        try:
+            _execute_backtest(db, run, dataset, model, policy)
+            run.status = "completed"
+            run.completed_at = datetime.utcnow()
+        except Exception as inner:
+            tb = traceback.format_exc()
+            run.status = "failed"
+            run.completed_at = datetime.utcnow()
+            run.error_message = f"{type(inner).__name__}: {inner}\n{tb[:500]}"
+        db.commit()
+        db.refresh(run)
+
+    # If dispatched, just refresh and return — the worker will update
+    # the run record as it progresses
+    if dispatched:
+        db.refresh(run)
 
     return _summary_out(run)
 
@@ -440,6 +463,15 @@ def _execute_backtest(
             except Exception:
                 pass
 
+    # TASK-8 follow-up: batch SHAP for tree models on the first N rows.
+    # Per-row SHAP is the bottleneck on large backtests (45K rows ×
+    # SHAP can be 30+ minutes). TreeExplainer in batch mode is ~100x
+    # faster. Only compute for the first N rows that get persisted —
+    # additional rows can compute on-demand from the row-detail API.
+    shap_top_per_row = _compute_batch_shap(
+        artifact, df[feature_cols], n=_INLINE_ROW_LIMIT,
+    )
+
     # Persist first 1000 row-level results
     n_to_store = min(_INLINE_ROW_LIMIT, len(scores))
     for i in range(n_to_store):
@@ -451,10 +483,78 @@ def _execute_backtest(
             decision=str(decisions[i]),
             approved_amount=float(approved_amounts[i]) if approved_amounts is not None else None,
             actual_outcome=int(outcomes[i]) if outcomes is not None and outcomes[i] >= 0 else None,
+            shap_top_features=shap_top_per_row[i] if shap_top_per_row else None,
         )
         db.add(row_result)
 
     db.commit()
+
+
+def _compute_batch_shap(
+    artifact: dict,
+    X_raw,
+    n: int = 1000,
+) -> Optional[list[list[dict]]]:
+    """
+    Compute the top-3 SHAP features per row in batch mode.
+
+    Returns: list of length n, each element is a list of {feature, value}
+    sorted by |contribution| desc. None if SHAP is not applicable to the
+    model type.
+
+    Uses TreeExplainer in batch mode for tree models (RF, XGB, LGB) —
+    100x faster than per-row scoring. For LR, skips (linear coefficient
+    contributions are easy to compute on-demand from the row-detail API).
+    """
+    try:
+        import shap
+        import joblib  # noqa: F401
+        import numpy as _np
+
+        if not isinstance(artifact, dict) or "model" not in artifact:
+            return None
+
+        clf = artifact["model"]
+        model_type = type(clf).__name__.lower()
+
+        # Only batch-friendly tree models in this MVP
+        if not any(t in model_type for t in ("xgb", "lgb", "forest", "boost")):
+            return None
+
+        # Apply preprocessing first so SHAP sees the same features the model did
+        if "preprocessor" in artifact:
+            X_proc = artifact["preprocessor"].transform(X_raw)
+        else:
+            X_proc = X_raw
+
+        # Trim to first n rows for the persisted slice
+        X_for_shap = X_proc.iloc[: min(n, len(X_proc))]
+
+        explainer = shap.TreeExplainer(clf)
+        shap_values = explainer.shap_values(X_for_shap)
+        if isinstance(shap_values, list):
+            # Multiclass — pick the positive-class contributions
+            shap_values = shap_values[1]
+
+        feature_names = list(X_proc.columns)
+        result = []
+        for row_vals in shap_values:
+            # Top 3 by absolute contribution
+            indexed = list(enumerate(row_vals))
+            indexed.sort(key=lambda x: abs(x[1]), reverse=True)
+            top_3 = [
+                {"feature": feature_names[i], "value": round(float(v), 6)}
+                for i, v in indexed[:3]
+            ]
+            result.append(top_3)
+        return result
+    except Exception as e:
+        # SHAP failures shouldn't break the backtest — log and continue
+        import logging
+        logging.getLogger("sentinel.backtest").warning(
+            "Batch SHAP skipped due to error: %s", e,
+        )
+        return None
 
 
 def _ladder_lookup(ladder: dict, decile: int) -> Optional[float]:
