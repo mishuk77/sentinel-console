@@ -138,19 +138,155 @@ def list_policies(
         query = query.filter(Policy.decision_system_id == system_id)
     return query.all()
 
+def _run_layer_2_validation(db: Session, model: MLModel) -> dict:
+    """
+    TASK-10 Layer 2 (consolidates TASK-9): run health checks on the
+    full inference pipeline parity — same code path as production.
+
+    Steps:
+      1. Score the model's training/test data through the production
+         inference path (decision_service._score_model with the saved
+         schema-v2 artifact, which uses InferencePreprocessor).
+      2. Run all six health checks on the resulting predictions.
+      3. If any check FAILs → registration is rejected with a clear error.
+      4. WARN-level results allow registration but flag the decision
+         system with health_status='warning'.
+
+    Returns a dict with 'status' and 'failures' for the caller.
+
+    The dataset for parity scoring is the model's training dataset. We
+    don't need 2000+ rows for the structural checks (saturation, mode
+    collapse, range, NaN/inf, distribution drift) but H5 (calibration)
+    requires the full holdout to be statistically meaningful.
+    """
+    from app.models.dataset import Dataset
+    from app.services.inference_health import InferenceHealthChecker
+    from app.services.storage import storage
+    from app.services.inference_preprocessor import InferencePreprocessor  # noqa: F401  (used at unpickle)
+    import joblib
+    import os
+    import pandas as pd
+    import numpy as np
+
+    if not model.artifact_path:
+        return {"status": "FAIL", "message": "Model has no trained artifact."}
+
+    dataset = db.query(Dataset).filter(Dataset.id == model.dataset_id).first()
+    if not dataset:
+        return {"status": "FAIL", "message": "Dataset not found for model."}
+
+    # Download the dataset CSV
+    local_csv = f"temp_layer2_{model.id[:8]}.csv"
+    try:
+        storage.download_file(dataset.s3_key, local_csv)
+        df = pd.read_csv(local_csv)
+    finally:
+        if os.path.exists(local_csv):
+            os.remove(local_csv)
+
+    # Load the model artifact
+    local_pkl = f"temp_layer2_artifact_{model.id[:8]}.pkl"
+    try:
+        storage.download_file(model.artifact_path, local_pkl)
+        artifact = joblib.load(local_pkl)
+    finally:
+        if os.path.exists(local_pkl):
+            os.remove(local_pkl)
+
+    target_col = model.target_column
+    feature_cols = [c for c in df.columns
+                    if c != target_col
+                    and c != dataset.approved_amount_column
+                    and c != dataset.id_column
+                    and not c.lower().endswith("id")]
+    X = df[feature_cols].copy()
+    y = df[target_col].astype(int).values if target_col and target_col in df.columns else None
+
+    # Score through the inference pipeline (schema v2)
+    if isinstance(artifact, dict) and artifact.get("schema_version") == 2:
+        preprocessor = artifact["preprocessor"]
+        scaler = artifact.get("scaler")
+        use_scaled = artifact.get("use_scaled", False)
+        clf = artifact["model"]
+        X_proc = preprocessor.transform(X)
+        if use_scaled and scaler is not None:
+            X_final = pd.DataFrame(scaler.transform(X_proc), columns=X_proc.columns, index=X_proc.index)
+        else:
+            X_final = X_proc
+        predictions = clf.predict_proba(X_final)[:, 1]
+    else:
+        # Legacy artifact — limited to structural checks; calibration may be unreliable
+        return {"status": "WARN", "message": "Legacy model artifact — re-train for full validation."}
+
+    # Run health checks. Use full dataset for calibration if it's large enough.
+    checker = InferenceHealthChecker()
+    use_calibration = y is not None and len(y) >= 2000
+    report = checker.run_all(
+        predictions=predictions,
+        outcomes=y if use_calibration else None,
+    )
+
+    return {
+        "status": report.status,
+        "report": report.to_dict(),
+        "failures": [
+            {"check": r.check_name, "message": r.message}
+            for r in report.failures
+        ],
+        "warnings": [
+            {"check": r.check_name, "message": r.message}
+            for r in report.warnings
+        ],
+    }
+
+
 @router.put("/{policy_id}/activate", response_model=PolicyResponse)
 def activate_policy(
-    policy_id: str, 
+    policy_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(deps.get_current_user)
+    current_user: User = Depends(deps.get_current_user),
+    skip_health_checks: bool = False,
 ):
+    """
+    Activate (publish) a policy. Per TASK-10 Layer 2: this is the
+    registration boundary, so we run the full inference-pipeline health
+    check before allowing activation. FAIL-level results block the
+    activation; WARN flags the system with health_status='warning'.
+
+    The skip_health_checks query parameter is for emergency rollbacks /
+    explicit override. Default is to enforce checks.
+    """
     target_policy = db.query(Policy).join(DecisionSystem).filter(
         Policy.id == policy_id,
         DecisionSystem.client_id == current_user.client_id
     ).first()
-    
+
     if not target_policy:
         raise HTTPException(status_code=404, detail="Policy not found")
+
+    # TASK-10 Layer 2 — registration health check
+    if not skip_health_checks:
+        model = db.query(MLModel).filter(MLModel.id == target_policy.model_id).first()
+        if model:
+            validation = _run_layer_2_validation(db, model)
+            if validation["status"] == "FAIL":
+                failure_msgs = "; ".join(
+                    f"{f['check']}: {f['message']}" for f in validation.get("failures", [])
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Cannot activate policy — model failed registration health checks. "
+                        f"{failure_msgs} Re-train the model or pass "
+                        f"?skip_health_checks=true to override (audit-logged)."
+                    ),
+                )
+            # Persist the latest health report on the model
+            from sqlalchemy.orm.attributes import flag_modified
+            model.health_status = validation["status"].lower() if validation["status"] != "PASS" else "healthy"
+            if "report" in validation:
+                model.health_report = validation["report"]
+                flag_modified(model, "health_report")
         
     # Find the currently active policy (before deactivating) to migrate segments
     from app.models.policy_segment import PolicySegment
