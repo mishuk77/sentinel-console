@@ -25,16 +25,29 @@ class LoanAmountService:
         upper = lower + step - 1
         return (lower, upper)
 
-    async def generate_ladder(self, db: Session, model_id: str, dataset_id: str, threshold: float, amount_col: str = "loan_amount", target_col: str = "charge_off"):
+    async def generate_ladder(self, db: Session, model_id: str, dataset_id: str, threshold: float, amount_col: str = None, target_col: str = None):
         """
         Generates the Max Loan Amount Ladder based on Out-of-Sample performance.
+
+        TASK-6: instead of hardcoding 'charge_off' / 'loan_amount' as defaults,
+        we resolve the columns from the model and dataset metadata. The caller
+        may still override (legacy code paths), but new callers should leave
+        these None so the metadata-driven values flow through.
         """
         # 1. Load Model & Dataset
         model = db.query(MLModel).filter(MLModel.id == model_id).first()
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
-        
+
         if not model or not dataset:
             raise ValueError("Model or Dataset not found")
+
+        # Resolve the target/amount columns from metadata when not overridden.
+        # If a caller passes "charge_off" explicitly that still works (legacy),
+        # but newly-trained models carry their target_column on the record.
+        if target_col is None:
+            target_col = getattr(model, "target_column", None) or "charge_off"
+        if amount_col is None:
+            amount_col = getattr(dataset, "approved_amount_column", None) or "loan_amount"
 
         # 2. Load Data
         print(f"Loading data from {dataset.s3_key}")

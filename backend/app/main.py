@@ -110,14 +110,36 @@ def startup_event():
     # MANUAL MIGRATION CHECK: models columns
     if "models" in inspector.get_table_names():
         columns = [c["name"] for c in inspector.get_columns("models")]
+        # TASK-6 adds target_column / loss_amount_column to make the
+        # outcome-flag and loss-amount handling explicit instead of relying
+        # on hardcoded 'charge_off' references throughout the codebase.
         model_migrations = {
             "decision_system_id": "VARCHAR",
+            "target_column": "VARCHAR",
+            "loss_amount_column": "VARCHAR",
         }
         for col_name, col_type in model_migrations.items():
             if col_name not in columns:
                 print(f"MIGRATION: Adding '{col_name}' to models table...")
                 with engine.connect() as conn:
                     conn.execute(text(f"ALTER TABLE models ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                print(f"MIGRATION: '{col_name}' column added.")
+
+    # MANUAL MIGRATION CHECK: datasets columns (TASK-6 + TASK-11F + TASK-11G)
+    if "datasets" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("datasets")]
+        dataset_migrations = {
+            "approved_amount_column": "VARCHAR",
+            "loss_amount_column": "VARCHAR",
+            "id_column": "VARCHAR",
+            "segmenting_dimensions": "JSON",
+        }
+        for col_name, col_type in dataset_migrations.items():
+            if col_name not in columns:
+                print(f"MIGRATION: Adding '{col_name}' to datasets table...")
+                with engine.connect() as conn:
+                    conn.execute(text(f"ALTER TABLE datasets ADD COLUMN {col_name} {col_type}"))
                     conn.commit()
                 print(f"MIGRATION: '{col_name}' column added.")
 

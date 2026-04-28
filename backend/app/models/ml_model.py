@@ -25,7 +25,16 @@ class MLModel(Base):
     artifact_path = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # TASK-6: explicit target column (the dependent variable the user picked
+    # at modeling time). Canonical reference for "what is the bad event"
+    # everywhere downstream — calibration, backtest, simulation, drift.
+    target_column = Column(String, nullable=True)
+
+    # TASK-6: optional loss-amount column for Mode 1. When set, the column is
+    # the dollar amount lost on the bad event (vs. assuming full principal).
+    loss_amount_column = Column(String, nullable=True)
+
     dataset = relationship("Dataset", back_populates="models")
-    
+
     decision_system_id = Column(String, ForeignKey("decision_systems.id"), nullable=True)
     decision_system = relationship("DecisionSystem", back_populates="models")

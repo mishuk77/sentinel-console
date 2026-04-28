@@ -68,7 +68,7 @@ async def upload_dataset(
     from io import BytesIO
     file_obj = BytesIO(content)
     location = storage.upload_file(file_obj, key)
-    
+
     # Create DB Record with module_type and label_column
     metadata = {
         "original_filename": file.filename,
@@ -79,20 +79,111 @@ async def upload_dataset(
     if label_column:
         metadata["label_column"] = label_column
 
+    # TASK-6: auto-suggest the approved-amount, loss-amount, and id columns
+    # at upload time so the user has sensible defaults to confirm. The user
+    # can override on the dataset detail page via PATCH /datasets/{id}.
+    from app.services.loss_metadata import (
+        suggest_approved_amount_column,
+        suggest_loss_amount_column,
+        suggest_id_column,
+    )
+
     dataset = Dataset(
         id=file_id,
         decision_system_id=system_id,
         s3_key=key,
         status=DatasetStatus.PENDING,
         module_type=module_type,
-        metadata_info=metadata
+        metadata_info=metadata,
+        approved_amount_column=suggest_approved_amount_column(columns),
+        loss_amount_column=suggest_loss_amount_column(columns),
+        id_column=suggest_id_column(columns),
     )
     # Immediate transition to VALID since we parsed it
     dataset.status = DatasetStatus.VALID if columns else DatasetStatus.INVALID
     db.add(dataset)
     db.commit()
     db.refresh(dataset)
-    
+
+    return dataset
+
+
+from pydantic import BaseModel
+from typing import Optional, List
+
+
+class DatasetMetadataUpdate(BaseModel):
+    """TASK-6 / TASK-11F / TASK-11G: payload for editing dataset column
+    annotations after upload. Each field is optional; only provided fields
+    are updated. Use null to clear a field."""
+    approved_amount_column: Optional[str] = None
+    loss_amount_column: Optional[str] = None
+    id_column: Optional[str] = None
+    segmenting_dimensions: Optional[List[str]] = None
+    # Sentinel value to explicitly clear a field — the field was provided
+    # but with the literal value "__clear__"
+    _clearable_fields: tuple = ()
+
+
+@router.patch("/{dataset_id}/metadata")
+def update_dataset_metadata(
+    dataset_id: str,
+    payload: DatasetMetadataUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Update dataset column annotations.
+
+    Only fields present in the request body are updated. To clear a field,
+    pass an empty string. Validates that the column names actually exist in
+    the dataset so we don't end up with stale references.
+    """
+    dataset = db.query(Dataset).join(DecisionSystem).filter(
+        Dataset.id == dataset_id,
+        DecisionSystem.client_id == current_user.client_id,
+    ).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    available_columns = (dataset.metadata_info or {}).get("columns") or []
+    available_lower = {c.lower() for c in available_columns}
+
+    def _validate_col(name: Optional[str], field: str) -> Optional[str]:
+        if name is None:
+            return None
+        if name == "":
+            return None  # explicit clear
+        if name.lower() not in available_lower:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Column '{name}' not found in dataset for field '{field}'. "
+                       f"Available: {available_columns}",
+            )
+        # Use the original casing to match the actual column name
+        return next(c for c in available_columns if c.lower() == name.lower())
+
+    if payload.approved_amount_column is not None:
+        dataset.approved_amount_column = _validate_col(
+            payload.approved_amount_column, "approved_amount_column"
+        )
+    if payload.loss_amount_column is not None:
+        dataset.loss_amount_column = _validate_col(
+            payload.loss_amount_column, "loss_amount_column"
+        )
+    if payload.id_column is not None:
+        dataset.id_column = _validate_col(payload.id_column, "id_column")
+    if payload.segmenting_dimensions is not None:
+        # Validate every entry in the list
+        validated = []
+        for col in payload.segmenting_dimensions:
+            v = _validate_col(col, "segmenting_dimensions")
+            if v:
+                validated.append(v)
+        dataset.segmenting_dimensions = validated
+
+    db.commit()
+    db.refresh(dataset)
     return dataset
 
 @router.get("/")

@@ -72,6 +72,11 @@ def celery_train_task(self, dataset_id: str, model_map: dict, target_col: str,
                         flag_modified(model, "metrics")
                         model.artifact_path = res["artifact_path"]
                         model.name = f"{algo_name}_{model_id[:8]}"
+                        # TASK-6: persist the dependent variable on the model
+                        # so downstream code (calibration, backtest,
+                        # simulation) reads it from metadata rather than
+                        # hardcoding 'charge_off'.
+                        model.target_column = target_col
                 else:
                     new_model = MLModel(
                         dataset_id=dataset_id,
@@ -81,6 +86,7 @@ def celery_train_task(self, dataset_id: str, model_map: dict, target_col: str,
                         name=f"{algo_name}_{res['version_id'][:8]}",
                         metrics=res["metrics"],
                         artifact_path=res["artifact_path"],
+                        target_column=target_col,  # TASK-6
                     )
                     db.add(new_model)
 
