@@ -128,6 +128,8 @@ def startup_event():
             # TASK-10 Layer 1: health-check fields populated at training time
             "health_status": "VARCHAR",
             "health_report": "JSON",
+            # TASK-10 Layer 3 H6: registration-time distribution baseline
+            "distribution_baseline": "JSON",
         }
         for col_name, col_type in model_migrations.items():
             if col_name not in columns:

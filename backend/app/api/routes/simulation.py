@@ -146,15 +146,41 @@ class SimulateResponse(BaseModel):
 
 
 # ────────────────────────────────────────────────────────────────────────
-# In-process row-score cache
+# In-process row-score cache (LRU-bounded)
 # ────────────────────────────────────────────────────────────────────────
 #
 # Scoring 50K rows takes 1-3 seconds with TreeExplainer in batch. We don't
 # want every slider drag to incur that cost. Cache the row-level score
-# array per (model_id, dataset_id) — busted automatically when artifact
-# path changes (which embeds version_id).
+# array per (model_id::artifact_path, dataset_id, approved_amount_column)
+# — busted automatically when artifact path or approved-amount column
+# annotation changes.
+#
+# LRU bound: 32 entries. Each entry holds two numpy arrays (scores +
+# amounts) at ~8 bytes/float × 50K rows × 2 arrays = ~800KB per entry
+# = ~25MB max. Comfortable for a single-tenant container.
+from collections import OrderedDict
 
-_score_cache: dict[tuple[str, str, str], dict] = {}
+_SCORE_CACHE_MAX_ENTRIES = 32
+_score_cache: "OrderedDict[tuple[str, str, str], dict]" = OrderedDict()
+
+
+def _cache_get(key):
+    """LRU read: re-orders the entry to most-recently-used position."""
+    if key not in _score_cache:
+        return None
+    _score_cache.move_to_end(key)
+    return _score_cache[key]
+
+
+def _cache_put(key, value):
+    """LRU write: evicts the least-recently-used entry when over capacity."""
+    if key in _score_cache:
+        _score_cache.move_to_end(key)
+        _score_cache[key] = value
+        return
+    _score_cache[key] = value
+    while len(_score_cache) > _SCORE_CACHE_MAX_ENTRIES:
+        _score_cache.popitem(last=False)  # pop oldest
 
 
 def _cache_key(
@@ -506,7 +532,7 @@ def _score_dataset(db: Session, model: MLModel, dataset: Dataset):
         model.id, dataset.id, model.artifact_path,
         dataset.approved_amount_column,
     )
-    cached = _score_cache.get(cache_key)
+    cached = _cache_get(cache_key)
     if cached is not None:
         return cached["scores"], cached["amounts"]
 
@@ -580,9 +606,9 @@ def _score_dataset(db: Session, model: MLModel, dataset: Dataset):
             detail=f"Unsupported model artifact type: {type(artifact)}",
         )
 
-    # Cache for next call (size unbounded for now — fine for single-tenant
-    # demos; bound by LRU later if memory becomes an issue)
-    _score_cache[cache_key] = {"scores": scores, "amounts": requested_amounts}
+    # LRU-bounded cache (32 entries). New entries evict the
+    # least-recently-used when over capacity.
+    _cache_put(cache_key, {"scores": scores, "amounts": requested_amounts})
     return scores, requested_amounts
 
 

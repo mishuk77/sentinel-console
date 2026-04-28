@@ -20,9 +20,12 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
+
 from app.celery_app import celery_app
 from app.db.session import SessionLocal
 from app.models.decision_system import DecisionSystem
+from app.models.ml_model import MLModel
 from app.services.inference_health import InferenceHealthChecker
 from app.services.inference_window import (
     fetch_window,
@@ -59,16 +62,29 @@ def run_inference_health_monitor():
                 # Too few predictions to evaluate meaningfully
                 continue
 
-            # Run the runtime-applicable checks (skip H5 — no outcomes;
-            # skip H6 — no registration baseline at runtime in this MVP.
-            # Adding H6 requires storing the baseline at registration; can
-            # be a follow-up.)
+            # Resolve the registration baseline for this system's active
+            # model. The baseline is captured at Layer 2 registration time
+            # and stored on model.distribution_baseline. If absent (legacy
+            # model registered before this field existed), H6 is skipped.
+            ds = db.query(DecisionSystem).filter(DecisionSystem.id == system_id).first()
+            baseline = None
+            if ds and ds.active_model_id:
+                m = db.query(MLModel).filter(MLModel.id == ds.active_model_id).first()
+                if m and m.distribution_baseline:
+                    baseline = np.asarray(m.distribution_baseline, dtype=float)
+
+            # Run the runtime-applicable checks. H5 is skipped at runtime
+            # because outcomes aren't available immediately — calibration
+            # validation lives at Layer 2 (registration) and on a
+            # longer-cadence retrospective task as outcomes arrive.
             results = [
                 checker.check_out_of_range(scores),
                 checker.check_nan_inf(scores),
                 checker.check_saturation(scores),
                 checker.check_mode_collapse(scores),
             ]
+            if baseline is not None and len(baseline) > 0:
+                results.append(checker.check_distribution_drift(scores, baseline))
             worst = "PASS"
             for r in results:
                 if r.status == "FAIL":

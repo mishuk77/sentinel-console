@@ -226,9 +226,24 @@ def _run_layer_2_validation(db: Session, model: MLModel) -> dict:
         outcomes=y if use_calibration else None,
     )
 
+    # TASK-10 Layer 3 H6: capture the prediction distribution at
+    # registration time as a fixed baseline. The runtime monitor compares
+    # subsequent rolling-window distributions against this baseline using
+    # the KS statistic. Stored as quantile values (P5..P95 in 10pp steps)
+    # — compact enough for the JSON column, enough resolution for KS.
+    if len(predictions) >= 100:
+        quantiles = [0.05, 0.15, 0.25, 0.35, 0.45,
+                     0.55, 0.65, 0.75, 0.85, 0.95]
+        baseline_quantiles = [
+            float(np.quantile(predictions, q)) for q in quantiles
+        ]
+    else:
+        baseline_quantiles = None
+
     return {
         "status": report.status,
         "report": report.to_dict(),
+        "distribution_baseline": baseline_quantiles,
         "failures": [
             {"check": r.check_name, "message": r.message}
             for r in report.failures
@@ -264,6 +279,26 @@ def activate_policy(
     if not target_policy:
         raise HTTPException(status_code=404, detail="Policy not found")
 
+    # Race protection: lock all policies in this decision system for the
+    # duration of the activate transaction. Without this, two concurrent
+    # activate calls could both pass the "deactivate others" step before
+    # either commits, leaving multiple published policies (a violation of
+    # the spec's singleton-published rule).
+    #
+    # SELECT ... FOR UPDATE works on Postgres (production). On SQLite
+    # (local dev / tests) it's a no-op but the operation is still safe
+    # because SQLite has process-level write locking. We catch the
+    # not-supported error rather than failing.
+    if target_policy.decision_system_id:
+        try:
+            db.query(Policy).filter(
+                Policy.decision_system_id == target_policy.decision_system_id
+            ).with_for_update().all()
+        except Exception:
+            # SQLite / drivers without FOR UPDATE — fall through. Process
+            # serialization in dev is acceptable; production is Postgres.
+            pass
+
     # TASK-10 Layer 2 — registration health check
     if not skip_health_checks:
         model = db.query(MLModel).filter(MLModel.id == target_policy.model_id).first()
@@ -281,12 +316,18 @@ def activate_policy(
                         f"?skip_health_checks=true to override (audit-logged)."
                     ),
                 )
-            # Persist the latest health report on the model
+            # Persist the latest health report + distribution baseline
+            # on the model. The baseline is fixed at the moment of
+            # registration and is what the Layer 3 runtime monitor
+            # compares subsequent rolling windows against.
             from sqlalchemy.orm.attributes import flag_modified
             model.health_status = validation["status"].lower() if validation["status"] != "PASS" else "healthy"
             if "report" in validation:
                 model.health_report = validation["report"]
                 flag_modified(model, "health_report")
+            if validation.get("distribution_baseline") is not None:
+                model.distribution_baseline = validation["distribution_baseline"]
+                flag_modified(model, "distribution_baseline")
         
     # Find the currently active policy (before deactivating) to migrate segments
     from app.models.policy_segment import PolicySegment

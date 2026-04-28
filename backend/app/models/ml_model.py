@@ -39,6 +39,15 @@ class MLModel(Base):
     health_status = Column(String, nullable=True)
     health_report = Column(JSON, nullable=True)
 
+    # TASK-10 Layer 3 H6: prediction distribution baseline captured at
+    # registration time. Stored as a list of quantile values (10 buckets,
+    # P5/P15/.../P95) — compact representation that's enough for KS-based
+    # drift detection without storing the full prediction array.
+    # Fixed at registration; does NOT shift over time. If the population
+    # genuinely changes, the user retrains + re-registers, which captures
+    # a new baseline.
+    distribution_baseline = Column(JSON, nullable=True)
+
     dataset = relationship("Dataset", back_populates="models")
 
     decision_system_id = Column(String, ForeignKey("decision_systems.id"), nullable=True)

@@ -15,26 +15,29 @@ logger = logging.getLogger("sentinel.inference")
 
 class DecisionService:
     def __init__(self):
-        self._model_cache = {} # version_id -> model_obj
+        # Cache key is (model.id, model.artifact_path) — including the
+        # artifact_path catches the rare case where a model record's
+        # artifact is replaced (e.g., re-uploaded) without a new MLModel
+        # being created. Without this, the cached model would diverge
+        # from what the artifact_path now points to.
+        self._model_cache: dict[tuple[str, str], object] = {}
 
     def _load_model(self, model: MLModel):
-        if model.id in self._model_cache:
-            return self._model_cache[model.id]
-        
+        cache_key = (model.id, model.artifact_path or "")
+        if cache_key in self._model_cache:
+            return self._model_cache[cache_key]
+
         print(f"Loading model {model.id} from {model.artifact_path}...")
-        # Download Pkl
-        # We need a way to get bytes directly or download to temp
-        # storage.download_file copies to a path.
         local_path = f"temp_model_{model.id}.pkl"
         storage.download_file(model.artifact_path, local_path)
-        
+
         loaded_model = joblib.load(local_path)
-        self._model_cache[model.id] = loaded_model
-        
+        self._model_cache[cache_key] = loaded_model
+
         # Cleanup
         if os.path.exists(local_path):
             os.remove(local_path)
-            
+
         return loaded_model
 
     def _compute_shap(self, clf, df):

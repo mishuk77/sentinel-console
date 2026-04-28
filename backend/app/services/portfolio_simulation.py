@@ -342,6 +342,46 @@ def _compute_stage(
     )
 
 
+def compute_deciles(scores: np.ndarray, n_deciles: int = 10) -> np.ndarray:
+    """
+    Stable rank-based decile assignment for a score array.
+
+    Decile 1 = LOWEST risk (lowest scores); Decile ``n_deciles`` = HIGHEST
+    risk. Uses ``rank(method='min')`` so ties get the same decile, then
+    maps to 1..n_deciles by scaled rank position.
+
+    Tiny populations (n < n_deciles) all go to decile 1 — there's not
+    enough data to form meaningful quantile bins.
+
+    This function is the SINGLE SOURCE OF TRUTH for decile assignment
+    across the codebase (TASK-3 simulation, TASK-8 backtest, TASK-11F
+    breakouts). Both must produce identical decile labels for the same
+    scores or the user sees inconsistent ladder application between
+    simulation and backtest.
+    """
+    n = len(scores)
+    if n < n_deciles:
+        return np.ones(n, dtype=int)
+    ranks = pd.Series(scores).rank(method="min")  # 1..n
+    deciles = ((ranks - 1) * n_deciles / n).astype(int) + 1
+    return deciles.clip(upper=n_deciles).values
+
+
+def ladder_lookup(ladder: dict, decile: int) -> Optional[float]:
+    """Look up a ladder entry by decile. Accepts int or string keys
+    (the ladder is JSON-stored, so keys round-trip as strings).
+
+    Returns None if no entry is defined for this decile — the caller
+    decides whether 'no entry' means 'no cap' (leave amount unchanged)
+    or 'reject' (zero amount)."""
+    if decile in ladder:
+        return float(ladder[decile])
+    str_key = str(decile)
+    if str_key in ladder:
+        return float(ladder[str_key])
+    return None
+
+
 def _apply_ladder(
     requested_amounts: np.ndarray,
     scores: np.ndarray,
@@ -353,28 +393,12 @@ def _apply_ladder(
     Apply the loan-amount ladder by decile. Returns a per-row amount array
     where approved rows are capped by the ladder and denied rows are zeroed.
 
-    Decile assignment uses score quantiles over the entire population (not
-    just approved rows) so the decile boundaries are stable as the cutoff
-    moves. Decile 1 = LOWEST risk (lowest scores); Decile n_deciles =
-    HIGHEST risk.
-
-    Note: in the existing loan_amount_service the ladder is keyed by
-    integer string ("1", "2", ...) when persisted in JSON. We accept both
-    int and string keys here to be defensive.
+    Decile assignment uses ``compute_deciles()`` so the simulation engine
+    and the backtest engine produce identical caps for the same input.
     """
     n = len(scores)
     out = requested_amounts.copy()
-
-    # Compute decile assignment for every row using quantiles. Use a stable
-    # rank-based approach to avoid edge cases when many scores tie.
-    if n >= n_deciles:
-        ranks = pd.Series(scores).rank(method="min")  # 1..n
-        # Map to decile 1..n_deciles
-        deciles = ((ranks - 1) * n_deciles / n).astype(int) + 1
-        deciles = deciles.clip(upper=n_deciles).values
-    else:
-        # Tiny populations — assign all to decile 1
-        deciles = np.ones(n, dtype=int)
+    deciles = compute_deciles(scores, n_deciles=n_deciles)
 
     # Cap each approved row's amount by its decile ladder entry
     for i in range(n):
@@ -382,7 +406,7 @@ def _apply_ladder(
             out[i] = 0.0
             continue
         d = int(deciles[i])
-        cap = _ladder_lookup(ladder, d)
+        cap = ladder_lookup(ladder, d)
         if cap is not None:
             out[i] = min(out[i], cap)
         # If ladder has no entry for this decile, leave amount unchanged
@@ -390,14 +414,9 @@ def _apply_ladder(
     return out
 
 
-def _ladder_lookup(ladder: dict, decile: int) -> Optional[float]:
-    """Look up a ladder entry. Accepts int or string keys."""
-    if decile in ladder:
-        return float(ladder[decile])
-    str_key = str(decile)
-    if str_key in ladder:
-        return float(ladder[str_key])
-    return None
+# Module-private aliases preserved for any internal callers that imported
+# the underscored names; new code should use the public names above.
+_ladder_lookup = ladder_lookup
 
 
 @dataclass

@@ -48,6 +48,7 @@ from app.models.ml_model import MLModel
 from app.models.policy import Policy
 from app.models.user import User
 from app.services.storage import storage
+from app.services.portfolio_simulation import compute_deciles, ladder_lookup
 
 router = APIRouter()
 
@@ -533,11 +534,15 @@ def _execute_backtest(
     )
 
     if ladder and requested is not None:
-        # Apply ladder by decile
-        decile_assignments = _compute_deciles(scores, n_deciles=10)
+        # Apply ladder by decile. Uses the shared compute_deciles +
+        # ladder_lookup utility from portfolio_simulation so backtest and
+        # simulation produce identical decile assignments — required for
+        # backtest results to match what an interactive simulation would
+        # show for the same population.
+        decile_assignments = compute_deciles(scores, n_deciles=10)
         approved_amounts = np.array([
-            min(requested[i], _ladder_lookup(ladder, decile_assignments[i]))
-            if decisions[i] == "approve" and _ladder_lookup(ladder, decile_assignments[i]) is not None
+            min(requested[i], ladder_lookup(ladder, decile_assignments[i]))
+            if decisions[i] == "approve" and ladder_lookup(ladder, decile_assignments[i]) is not None
             else (requested[i] if decisions[i] == "approve" else 0.0)
             for i in range(len(scores))
         ])
@@ -805,24 +810,6 @@ def _compute_batch_shap(
             "Batch SHAP skipped due to error: %s", e,
         )
         return None
-
-
-def _ladder_lookup(ladder: dict, decile: int) -> Optional[float]:
-    if decile in ladder:
-        return float(ladder[decile])
-    str_key = str(decile)
-    if str_key in ladder:
-        return float(ladder[str_key])
-    return None
-
-
-def _compute_deciles(scores: np.ndarray, n_deciles: int = 10) -> np.ndarray:
-    n = len(scores)
-    if n < n_deciles:
-        return np.ones(n, dtype=int)
-    ranks = pd.Series(scores).rank(method="min")
-    deciles = ((ranks - 1) * n_deciles / n).astype(int) + 1
-    return deciles.clip(upper=n_deciles).values
 
 
 def _hash_dataset(dataset: Dataset) -> str:
