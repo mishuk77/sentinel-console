@@ -122,6 +122,9 @@ def startup_event():
             "decision_system_id": "VARCHAR",
             "target_column": "VARCHAR",
             "loss_amount_column": "VARCHAR",
+            # TASK-10 Layer 1: health-check fields populated at training time
+            "health_status": "VARCHAR",
+            "health_report": "JSON",
         }
         for col_name, col_type in model_migrations.items():
             if col_name not in columns:

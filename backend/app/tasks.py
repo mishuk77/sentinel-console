@@ -77,6 +77,10 @@ def celery_train_task(self, dataset_id: str, model_map: dict, target_col: str,
                         # simulation) reads it from metadata rather than
                         # hardcoding 'charge_off'.
                         model.target_column = target_col
+                        # TASK-10 Layer 1: persist health check status / report
+                        model.health_status = res.get("health_status")
+                        model.health_report = res.get("health_report")
+                        flag_modified(model, "health_report")
                 else:
                     new_model = MLModel(
                         dataset_id=dataset_id,
@@ -87,6 +91,8 @@ def celery_train_task(self, dataset_id: str, model_map: dict, target_col: str,
                         metrics=res["metrics"],
                         artifact_path=res["artifact_path"],
                         target_column=target_col,  # TASK-6
+                        health_status=res.get("health_status"),  # TASK-10 Layer 1
+                        health_report=res.get("health_report"),
                     )
                     db.add(new_model)
 

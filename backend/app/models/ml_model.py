@@ -34,6 +34,11 @@ class MLModel(Base):
     # the dollar amount lost on the bad event (vs. assuming full principal).
     loss_amount_column = Column(String, nullable=True)
 
+    # TASK-10 Layer 1: health check status set by training.
+    # PASS / WARN / FAIL — FAIL prevents the artifact from being saved.
+    health_status = Column(String, nullable=True)
+    health_report = Column(JSON, nullable=True)
+
     dataset = relationship("Dataset", back_populates="models")
 
     decision_system_id = Column(String, ForeignKey("decision_systems.id"), nullable=True)

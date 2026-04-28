@@ -349,6 +349,39 @@ class TrainingService:
                       f"{self._display_name(name)} holdout AUC: {auc:.4f} · {cv_vs_holdout} — "
                       f"{'good generalization' if best_cv_score and abs(auc - best_cv_score) < 0.02 else 'check overfitting' if best_cv_score and auc < best_cv_score - 0.02 else 'validated'}")
 
+            # ── TASK-10 Layer 1: training-time health checks ──
+            # Run all six checks on the holdout predictions. FAIL blocks
+            # artifact save (the model is mathematically broken). WARN
+            # saves the artifact but flags it on the model record.
+            from app.services.inference_health import InferenceHealthChecker
+            health_report = InferenceHealthChecker().run_all(
+                predictions=preds,
+                outcomes=y_test.values if len(preds) >= 2000 else None,
+            )
+
+            if health_report.status == "FAIL":
+                failures = ", ".join(
+                    f"{r.check_name}: {r.message}" for r in health_report.failures
+                )
+                self.emit(job_id, f"health_{name}", "error",
+                          f"{self._display_name(name)} health checks FAILED — "
+                          f"artifact NOT saved. {failures}")
+                logger.error(f"Health check FAIL for {name}: {failures}")
+                # Skip this model — don't save the artifact
+                continue
+            elif health_report.status == "WARN":
+                warnings_text = " · ".join(
+                    f"{r.check_name}: {r.message}"
+                    for r in health_report.warnings
+                )
+                self.emit(job_id, f"health_{name}", "warn",
+                          f"{self._display_name(name)} health checks WARN — "
+                          f"saved with caveat. {warnings_text}")
+            else:
+                self.emit(job_id, f"health_{name}", "done",
+                          f"{self._display_name(name)} health checks PASS "
+                          f"({len(health_report.results)} checks)")
+
             # Cross-validation scores
             cv_fold_scores, cv_auc_mean, cv_auc_std = [], None, None
             if best_cv_score:
@@ -412,6 +445,8 @@ class TrainingService:
             results.append({
                 "name": name,
                 "version_id": version_id,
+                "health_status": health_report.status,
+                "health_report": health_report.to_dict(),
                 "metrics": {
                     "auc": auc,
                     "cv_fold_scores": cv_fold_scores,
