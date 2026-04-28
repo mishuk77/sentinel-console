@@ -737,12 +737,32 @@ export default function Policy() {
 
             {/* Segmentation Tab */}
             {activeTab === "segmentation" && (
-                <SegmentationTab
-                    policyId={system?.active_policy_id}
-                    globalThreshold={system?.active_policy_summary?.threshold ?? 0}
-                    globalDefaultRate={system?.active_policy_summary ? (1 - (system.active_policy_summary.approval_rate || 0)) : 0}
-                    datasetId={selectedModel?.dataset_id}
-                />
+                <>
+                    {/* TASK-4B: cascade behavior banner */}
+                    <div className="panel p-4 border-info/30 bg-info/5 flex items-start gap-3 mb-2">
+                        <Info className="h-4 w-4 text-info shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-sm font-medium text-foreground">
+                                How segmented policies work
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                                Segmented policies override the global policy for matching applications.
+                                Applications not matching any segment automatically use the global policy
+                                (cutoff <span className="font-mono font-semibold text-foreground">
+                                    {((system as any)?.active_policy_summary?.threshold ?? 0).toFixed(3)}
+                                </span>).
+                                When an application matches multiple segments with custom thresholds, the
+                                most restrictive (lowest) threshold is applied.
+                            </p>
+                        </div>
+                    </div>
+                    <SegmentationTab
+                        policyId={system?.active_policy_id}
+                        globalThreshold={(system as any)?.active_policy_summary?.threshold ?? 0}
+                        globalDefaultRate={(system as any)?.active_policy_summary ? (1 - ((system as any).active_policy_summary.approval_rate || 0)) : 0}
+                        datasetId={selectedModel?.dataset_id}
+                    />
+                </>
             )}
         </div>
     );

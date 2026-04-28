@@ -302,6 +302,82 @@ class DecisionService:
 
         return tier, action, disposition_detail
 
+    def _resolve_segment_threshold(self, db, policy, input_data):
+        """
+        TASK-4A: cascading segment policy logic.
+
+        For each application:
+            If application matches a segment AND that segment has a defined
+            threshold (override_threshold or system-derived threshold):
+                apply segment threshold
+            Else:
+                apply global policy threshold
+
+        Multi-segment match: when an application matches multiple segments
+        with custom thresholds, apply the MOST RESTRICTIVE (lowest) and log
+        a warning so the user knows the configuration has an ambiguity.
+
+        Returns (resolved_threshold, segment_label) where segment_label is
+        either the name of the matched segment or None for global fallback.
+        """
+        from app.models.policy_segment import PolicySegment
+        if not policy:
+            return None, None
+
+        segments = db.query(PolicySegment).filter(
+            PolicySegment.policy_id == policy.id,
+            PolicySegment.is_active == True,
+            PolicySegment.is_global == False,
+        ).all()
+
+        matched = []
+        for seg in segments:
+            if seg.filters and self._matches_segment(seg.filters, input_data):
+                # Use override threshold if set, else system-derived
+                t = seg.override_threshold if seg.override_threshold is not None else seg.threshold
+                if t is not None:
+                    matched.append((seg, t))
+
+        if not matched:
+            return policy.threshold, None  # global fallback
+
+        if len(matched) > 1:
+            logger.warning(
+                "Application matched %d segments with custom thresholds: %s. "
+                "Applying most restrictive (lowest) threshold.",
+                len(matched), [s.name for s, _ in matched],
+            )
+
+        # Most restrictive = lowest threshold (fewer applicants approved)
+        seg, t = min(matched, key=lambda x: x[1])
+        return t, seg.name
+
+    def _matches_segment(self, filters: dict, input_data: dict) -> bool:
+        """Check whether an applicant matches all filter conditions of a
+        segment. Filters is a dict of {column: value} pairs (exact match).
+
+        For range or set-based filters, the value can be a dict like
+        {'op': '>=', 'value': 30} or {'op': 'in', 'values': [...]}.
+        """
+        if not filters:
+            return True
+        for col, expected in filters.items():
+            actual = input_data.get(col)
+            if isinstance(expected, dict) and "op" in expected:
+                op = expected["op"]
+                if op in (">=", "gte") and not (actual is not None and actual >= expected["value"]):
+                    return False
+                if op in ("<=", "lte") and not (actual is not None and actual <= expected["value"]):
+                    return False
+                if op == "in" and actual not in expected.get("values", []):
+                    return False
+                if op == "==" and actual != expected.get("value"):
+                    return False
+            else:
+                if actual != expected:
+                    return False
+        return True
+
     def make_decision(self, db: Session, input_data: dict, system_id: str):
         from app.models.fraud import FraudTierConfig
         from app.models.decision_system import DecisionSystem
@@ -339,8 +415,16 @@ class DecisionService:
 
             credit_score, credit_df, credit_clf = self._score_model(db, credit_model, input_data)
 
+            # TASK-4A: cascading segment policy resolution. Apply segment
+            # threshold if the applicant matches one with a custom cutoff;
+            # otherwise fall back to the global policy threshold.
+            resolved_threshold, matched_segment = self._resolve_segment_threshold(
+                db, active_policy, input_data
+            )
+            effective_threshold = resolved_threshold if resolved_threshold is not None else active_policy.threshold
+
             # Credit Decision (Policy)
-            result_str = "APPROVE" if credit_score < active_policy.threshold else "DECLINE"
+            result_str = "APPROVE" if credit_score < effective_threshold else "DECLINE"
 
             # Exposure Control (Loan Amount Ladder)
             if result_str == "APPROVE":
@@ -380,8 +464,10 @@ class DecisionService:
                         break
 
             reason_codes = {
-                "cutoff": float(active_policy.threshold),
+                "cutoff": float(effective_threshold),
+                "global_cutoff": float(active_policy.threshold),
                 "score": float(credit_score),
+                "matched_segment": matched_segment,  # None when global fallback
             }
             for f, v in shap_contributions[:3]:
                 reason_codes[f] = float(v)
