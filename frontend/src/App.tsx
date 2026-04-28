@@ -11,6 +11,7 @@ import Deployments from "@/pages/Deployments";
 import Policy from "@/pages/Policy";
 import ExposureControl from "@/pages/ExposureControl";
 import SimulationSummary from "@/pages/SimulationSummary";
+import EngineBacktest from "@/pages/EngineBacktest";
 import FraudOverview from "@/pages/FraudOverview";
 import FraudData from "@/pages/FraudData";
 import FraudTraining from "@/pages/FraudTraining";
@@ -131,6 +132,9 @@ function App() {
 
                 {/* TASK-7: Projected Simulation Summary */}
                 <Route path="simulation-summary" element={<SimulationSummary />} />
+
+                {/* TASK-8: Engine Backtest */}
+                <Route path="backtest" element={<EngineBacktest />} />
 
                 {/* Monitoring */}
                 <Route path="monitoring" element={<Monitoring />} />

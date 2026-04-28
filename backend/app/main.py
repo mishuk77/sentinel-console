@@ -44,7 +44,8 @@ def startup_event():
     import app.models.client
     import app.models.user
     import app.models.fraud
-    
+    import app.models.backtest  # TASK-8
+
     print("Checking database schema...")
     from sqlalchemy import text, inspect
     

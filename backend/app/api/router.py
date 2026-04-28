@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from app.api.routes import (
     datasets, models, decision, dashboard, policies, systems, auth, fraud,
-    policy_segments, simulation,
+    policy_segments, simulation, backtest,
 )
 
 api_router = APIRouter()
@@ -16,6 +16,9 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 
 # TASK-3 / TASK-2 / TASK-7: portfolio simulation endpoint
 api_router.include_router(simulation.router, prefix="/simulate", tags=["simulation"])
+
+# TASK-8: Engine Backtest
+api_router.include_router(backtest.router, prefix="/backtest", tags=["backtest"])
 
 # Fraud Management Module
 api_router.include_router(fraud.router, tags=["fraud"])
