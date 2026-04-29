@@ -347,10 +347,7 @@ export default function ModelDetail() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Feature Importance */}
                 <div className="lg:col-span-1 panel p-5">
-                    <h3 className="text-sm font-semibold mb-1">Top Risk Drivers</h3>
-                    <p className="text-xs text-muted-foreground mb-4">
-                        <span className="text-down font-medium">Red</span> = increases risk, <span className="text-up font-medium">green</span> = decreases it.
-                    </p>
+                    <h3 className="text-sm font-semibold mb-4">Top Risk Drivers</h3>
 
                     {featureImportance.length > 0 ? (
                         <div className="h-[300px] w-full">
@@ -364,17 +361,22 @@ export default function ModelDetail() {
                                     <XAxis type="number" hide />
                                     <YAxis dataKey="feature" type="category" width={120} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
                                     <Tooltip
-                                        formatter={(value: any, _name: any, props: any) => [
-                                            `${value.toFixed(4)} (${props.payload.impact})`,
+                                        formatter={(value: any) => [
+                                            value.toFixed(4),
                                             "Importance"
                                         ]}
                                         contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
                                     />
+                                    {/* Uniform blue across all models — feature_importances_
+                                        for tree models has no directional sign, and even LR
+                                        coefficients can be misleading after preprocessing
+                                        (target encoding, scaling). Magnitude is what's
+                                        actually being shown. */}
                                     <Bar dataKey="importance" radius={[0, 4, 4, 0]} barSize={18}>
-                                        {featureImportance.map((feat: any, index: number) => (
+                                        {featureImportance.map((_feat: any, index: number) => (
                                             <Cell
                                                 key={`cell-${index}`}
-                                                fill={feat.impact?.includes("Increases") ? "#ef4444" : "#22c55e"}
+                                                fill="hsl(210,100%,58%)"
                                                 fillOpacity={1 - index * 0.04}
                                             />
                                         ))}
