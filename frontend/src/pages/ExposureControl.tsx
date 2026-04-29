@@ -45,6 +45,7 @@ export default function ExposureControl() {
     const [selectedAmountCol, setSelectedAmountCol] = useState<string>("");
     const [isGeneratingAmounts, setIsGeneratingAmounts] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
 
     const { data: models } = useQuery<MLModel[]>({
         queryKey: ["models", systemId],
@@ -222,11 +223,19 @@ export default function ExposureControl() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["system", systemId] });
+            queryClient.invalidateQueries({ queryKey: ["policies", systemId] });
+            queryClient.invalidateQueries({ queryKey: ["simulate"] });
+            queryClient.invalidateQueries({ queryKey: ["simulate-breakout"] });
+            queryClient.invalidateQueries({ queryKey: ["policy-diff"] });
+            setSaveError(null);
             setSaveSuccess(true);
             setTimeout(() => setSaveSuccess(false), 3000);
         },
-        onError: (err) => {
-            console.error("Failed to save exposure settings:", err);
+        onError: (err: any) => {
+            const detail = err?.response?.data?.detail
+                || err?.message
+                || "Failed to save exposure settings.";
+            setSaveError(typeof detail === "string" ? detail : JSON.stringify(detail));
         }
     });
 
@@ -499,17 +508,25 @@ export default function ExposureControl() {
                         )}
 
                         {hasLoanAmountData && (
-                            <button
-                                onClick={() => saveMutation.mutate()}
-                                disabled={saveMutation.isPending}
-                                className="btn-primary w-full mt-5 h-10"
-                            >
-                                {saveMutation.isPending ? "Saving…" : saveSuccess ? (
-                                    <>Saved! <Check className="ml-2 h-4 w-4" /></>
-                                ) : (
-                                    <><Shield className="mr-2 h-4 w-4" />Save Exposure Settings</>
+                            <>
+                                <button
+                                    onClick={() => saveMutation.mutate()}
+                                    disabled={saveMutation.isPending}
+                                    className="btn-primary w-full mt-5 h-10"
+                                >
+                                    {saveMutation.isPending ? "Saving…" : saveSuccess ? (
+                                        <>Saved! <Check className="ml-2 h-4 w-4" /></>
+                                    ) : (
+                                        <><Shield className="mr-2 h-4 w-4" />Save Exposure Settings</>
+                                    )}
+                                </button>
+                                {saveError && (
+                                    <div className="mt-2 p-2.5 bg-destructive/10 border border-destructive/30 rounded flex items-start gap-2">
+                                        <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                                        <p className="text-2xs text-destructive break-words flex-1">{saveError}</p>
+                                    </div>
                                 )}
-                            </button>
+                            </>
                         )}
                     </div>
 

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
-import { ArrowLeft, BarChart2, Shield, FileDown, Loader2, Cpu, Zap, ShieldCheck, Layers, ChevronDown, ChevronUp, FlaskConical, Target, Scale, Scissors, Binary, GitMerge } from "lucide-react";
+import { ArrowLeft, BarChart2, Shield, FileDown, Loader2, Cpu, Zap, ShieldCheck, Layers, ChevronDown, ChevronUp, FlaskConical, Target, Scale, Scissors, Binary, GitMerge, AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HealthStatusBadge } from "@/components/ui/HealthStatusBadge";
 import { HealthReportPanel } from "@/components/ui/HealthReportPanel";
@@ -39,14 +39,22 @@ export default function ModelDetail() {
         enabled: !!id
     });
 
+    const [activateError, setActivateError] = useState<string | null>(null);
     const activateMutation = useMutation({
         mutationFn: async () => {
             await api.post(`/models/${id}/activate`, {});
         },
         onSuccess: () => {
+            setActivateError(null);
             queryClient.invalidateQueries({ queryKey: ["model", id] });
             queryClient.invalidateQueries({ queryKey: ["models", systemId] });
             queryClient.invalidateQueries({ queryKey: ["system", systemId] });
+        },
+        onError: (err: any) => {
+            const detail = err?.response?.data?.detail
+                || err?.message
+                || "Failed to activate model.";
+            setActivateError(typeof detail === "string" ? detail : JSON.stringify(detail));
         },
     });
 
@@ -160,6 +168,19 @@ export default function ModelDetail() {
                     )}
                 </div>
             </div>
+
+            {activateError && (
+                <div className="panel p-3 border-destructive/30 bg-destructive/5 flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-destructive">Activation failed</p>
+                        <p className="text-2xs text-destructive/90 break-words">{activateError}</p>
+                    </div>
+                    <button onClick={() => setActivateError(null)} className="text-destructive/70 hover:text-destructive">
+                        <X className="h-3.5 w-3.5" />
+                    </button>
+                </div>
+            )}
 
             {/* ── Hero KPI Row ───────────────────────────────── */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

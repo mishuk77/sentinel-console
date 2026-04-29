@@ -600,8 +600,14 @@ def _execute_backtest(
                 if (y == 1).sum() > 0 and (y == 0).sum() > 0:
                     ks_stat = ks_2samp(p[y == 1], p[y == 0]).statistic
                     run.ks_statistic = float(ks_stat)
-            except Exception:
-                pass
+            except Exception as _metrics_err:
+                # Don't fail the whole backtest if a single metric calc errors,
+                # but log loudly so the missing metric is debuggable.
+                import logging
+                logging.getLogger(__name__).warning(
+                    "backtest %s: metric calc failed: %s: %s",
+                    getattr(run, "id", "?"), type(_metrics_err).__name__, _metrics_err,
+                )
 
     # TASK-8 follow-up: batch SHAP for tree models on the first N rows.
     # Per-row SHAP is the bottleneck on large backtests (45K rows ×

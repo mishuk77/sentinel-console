@@ -234,7 +234,12 @@ def _score_segment(X_raw, y, seg_mask, artifact, full_scores=None):
 
     try:
         eval_df["decile"] = pd.qcut(eval_df["score"], n_bins, labels=False, duplicates="drop")
-    except Exception:
+    except Exception as _qcut_err:
+        import logging
+        logging.getLogger(__name__).warning(
+            "_score_segment qcut failed (n=%d, n_bins=%d): %s: %s",
+            n, n_bins, type(_qcut_err).__name__, _qcut_err,
+        )
         return None
 
     calibration = []
