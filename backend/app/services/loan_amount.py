@@ -78,25 +78,68 @@ class LoanAmountService:
             test_df = test_df[test_df[amount_col] > 0].copy()
             
             # 4. Score the Test Set
-            # Load Model Artifact
+            # Load Model Artifact (handles Schema v2 dict and legacy formats)
             local_model_path = f"temp_model_{model_id}.pkl"
             storage.download_file(model.artifact_path, local_model_path)
-            clf = joblib.load(local_model_path)
+            artifact = joblib.load(local_model_path)
             os.remove(local_model_path)
-            
-            # Prepare Features
-            # If model has feature_names_in_, use them.
-            if hasattr(clf, "feature_names_in_"):
-                X_test = test_df.reindex(columns=clf.feature_names_in_, fill_value=0)
+
+            # Build raw feature DataFrame (drop target + amount + id-ish columns).
+            # Schema v2 artifacts run their own preprocessor on raw columns,
+            # so we must NOT pre-encode here.
+            exclude = {target_col.lower(), amount_col.lower(), "id", "customer_id",
+                       "created_at", "applicant_id", "uuid", "name", "email", "phone"}
+            feature_cols = [
+                c for c in test_df.columns
+                if c.lower() not in exclude and not c.lower().endswith("id")
+            ]
+            X_raw = test_df[feature_cols]
+
+            # Schema dispatch — same pattern as decision_service / simulation.
+            # Without this dispatch, Schema v2 artifacts (dict with embedded
+            # InferencePreprocessor) raise AttributeError on .predict_proba.
+            if isinstance(artifact, dict) and artifact.get("schema_version") == 2 \
+                    and "preprocessor" in artifact:
+                clf = artifact["model"]
+                preprocessor = artifact["preprocessor"]
+                scaler = artifact.get("scaler")
+                use_scaled = artifact.get("use_scaled", False)
+                X_processed = preprocessor.transform(X_raw)
+                if use_scaled and scaler is not None:
+                    X_test = pd.DataFrame(
+                        scaler.transform(X_processed),
+                        columns=X_processed.columns,
+                        index=X_processed.index,
+                    )
+                else:
+                    X_test = X_processed
+                preds = clf.predict_proba(X_test)[:, 1]
+            elif isinstance(artifact, dict) and "model" in artifact:
+                # Legacy v1 individual-model wrapper
+                clf = artifact["model"]
+                columns = artifact.get("columns")
+                scaler = artifact.get("scaler")
+                X_test = pd.get_dummies(X_raw, dummy_na=True).fillna(0)
+                if columns:
+                    X_test = X_test.reindex(columns=columns, fill_value=0)
+                if scaler is not None:
+                    X_test = pd.DataFrame(scaler.transform(X_test),
+                                          columns=getattr(scaler, "feature_names_in_", columns),
+                                          index=X_test.index)
+                preds = clf.predict_proba(X_test)[:, 1]
+            elif hasattr(artifact, "predict_proba"):
+                # Raw sklearn model
+                if hasattr(artifact, "feature_names_in_"):
+                    X_test = X_raw.reindex(columns=artifact.feature_names_in_, fill_value=0)
+                else:
+                    X_test = pd.get_dummies(X_raw, dummy_na=True).fillna(0)
+                preds = artifact.predict_proba(X_test)[:, 1]
             else:
-                # Fallback: drop known non-features (risky but MVP)
-                exclude = [target_col, amount_col, "id", "customer_id", "created_at"]
-                cols = [c for c in test_df.columns if c.lower() not in exclude]
-                X_test = pd.get_dummies(test_df[cols]).fillna(0)
-                # Note: This fallback is dangerous if dummies differ from training. 
-                # Ideally we rely on feature_names_in_ which most sklearn models have now.
-            
-            preds = clf.predict_proba(X_test)[:, 1]
+                raise ValueError(
+                    f"Unsupported artifact type for ladder generation: {type(artifact)} "
+                    f"keys={list(artifact.keys()) if isinstance(artifact, dict) else 'n/a'}"
+                )
+
             test_df["score"] = preds
             
             # 5. Compute Deciles
