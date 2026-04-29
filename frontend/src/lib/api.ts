@@ -639,18 +639,32 @@ export interface LoanAmountLadderRequest {
     threshold: number;
 }
 
+export interface PolicyPublishRequest {
+    model_id: string;
+    decision_system_id: string;
+    threshold: number;
+    projected_approval_rate?: number;
+    projected_loss_rate?: number;
+    target_decile?: number;
+    amount_ladder?: Record<string, number>;
+}
+
 export const policiesAPI = {
-    list: (systemId?: string) => 
+    list: (systemId?: string) =>
         api.get<Policy[]>('/policies', { params: systemId ? { system_id: systemId } : {} }),
-    
+
     create: (data: CreatePolicyRequest) => api.post<Policy>('/policies', data),
-    
-    activate: (policyId: string) => 
+
+    activate: (policyId: string) =>
         api.put<Policy>(`/policies/${policyId}/activate`),
-    
-    recommendAmounts: (data: LoanAmountLadderRequest) => 
+
+    /** Atomic create+activate. Demo-grade replacement for create()+activate(). */
+    publish: (data: PolicyPublishRequest) =>
+        api.post<Policy>('/policies/publish', data),
+
+    recommendAmounts: (data: LoanAmountLadderRequest) =>
         api.post<any>('/policies/recommend-amounts', data),
-    
+
     delete: (policyId: string) => api.delete(`/policies/${policyId}`),
 };
 

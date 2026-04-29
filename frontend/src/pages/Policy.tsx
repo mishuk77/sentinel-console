@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, useParams, Link } from "react-router-dom";
 import { useSystem } from "@/lib/hooks";
 import type { MLModel, PolicySegment } from "@/lib/api";
-import { api, segmentsAPI, datasetsAPI } from "@/lib/api";
+import { api, segmentsAPI, datasetsAPI, policiesAPI } from "@/lib/api";
 import {
     Scale, Check, AlertTriangle, Trash2, AlertCircle, X, ArrowRight,
     CheckCircle, Layers, Plus, ChevronRight, ChevronLeft, RefreshCw, Info
@@ -127,6 +127,9 @@ export default function Policy() {
     const [isDragging, setIsDragging] = useState(false);
     const [policyName, setPolicyName] = useState("Proactive Risk Policy");
     const [activationSuccess, setActivationSuccess] = useState(false);
+    const [activationError, setActivationError] = useState<string | null>(null);
+    const [lastSavedThreshold, setLastSavedThreshold] = useState<number | null>(null);
+    const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
     const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
 
     const { data: models } = useQuery<MLModel[]>({
@@ -249,36 +252,61 @@ export default function Policy() {
 
     const activateMutation = useMutation({
         mutationFn: async () => {
-            if (!selectedModel) return;
-            const policyPayload = {
+            if (!selectedModel || !systemId) {
+                throw new Error("Select a model before publishing.");
+            }
+            if (currentBin?.score === undefined || currentBin?.score === null) {
+                throw new Error("No cutoff set — drag the slider before publishing.");
+            }
+            // Atomic create+activate. Single transaction backend-side, so
+            // we never end up with an orphan draft policy or a half-activated
+            // state. Returns the activated policy.
+            const res = await policiesAPI.publish({
                 model_id: selectedModel.id,
                 decision_system_id: systemId,
-                threshold: currentBin?.score ?? 0.5,
+                threshold: currentBin.score,
                 projected_approval_rate: approvalRate,
                 projected_loss_rate: approvedBadRate / 100,
                 target_decile: Math.round(approvalPct / 10),
-            };
-            const res = await api.post("/policies/", policyPayload);
-            const policyId = res.data.id;
-            await api.put(`/policies/${policyId}/activate`);
+            });
+            return res.data;
         },
-        onSuccess: async () => {
-            // Wait for the system query to refetch *before* invalidating
-            // segment queries. Otherwise segment caches refetch under the
-            // stale active_policy_id, pin themselves there, and the
-            // Segmentation tab keeps showing the previous global threshold.
+        onSuccess: async (savedPolicy) => {
+            setActivationError(null);
+            // Refetch system FIRST so downstream segment queries pick up the
+            // new active_policy_id. invalidate-and-await blocks until the
+            // refetch completes (or the query is inactive).
             await queryClient.invalidateQueries({ queryKey: ["system", systemId] });
             queryClient.invalidateQueries({ queryKey: ["policies", systemId] });
             queryClient.invalidateQueries({ queryKey: ["models", systemId] });
-            // All segment-scoped caches: list, per-segment calibration,
-            // and the 3-stage impact comparison. Wildcard match on the
-            // first key element so every variant is dropped.
             queryClient.invalidateQueries({ queryKey: ["segments"] });
             queryClient.invalidateQueries({ queryKey: ["segment-calibration"] });
             queryClient.invalidateQueries({ queryKey: ["segment-impact"] });
+
+            // Verification: confirm the active threshold matches what we just
+            // sent. If they diverge, a stale cache or partial save happened.
+            const verifyRes = await api.get(`/systems/${systemId}`);
+            const verified = verifyRes.data?.active_policy_summary?.threshold;
+            const sent = savedPolicy?.threshold;
+            if (typeof verified === "number" && typeof sent === "number"
+                && Math.abs(verified - sent) > 1e-6) {
+                setActivationError(
+                    `Save verified mismatch — sent ${sent.toFixed(4)} but server reports ${verified.toFixed(4)}. Refresh and retry.`
+                );
+                return;
+            }
+
+            setLastSavedThreshold(savedPolicy?.threshold ?? null);
+            setLastSavedAt(new Date().toLocaleTimeString());
             setActivationSuccess(true);
-            setTimeout(() => setActivationSuccess(false), 3000);
-        }
+            setTimeout(() => setActivationSuccess(false), 4000);
+        },
+        onError: (err: any) => {
+            const detail = err?.response?.data?.detail
+                || err?.message
+                || "Publish failed — check the network tab and try again.";
+            setActivationError(typeof detail === "string" ? detail : JSON.stringify(detail));
+        },
     });
 
     if (!models) return <div className="p-8">Loading models...</div>;
@@ -494,9 +522,6 @@ export default function Policy() {
                                         })()}
                                         <button
                                             onClick={() => {
-                                                // TASK-11E: show impact summary modal before publishing
-                                                // when there's an existing published policy. First-time
-                                                // activation has nothing to compare against, so go direct.
                                                 if ((system as any)?.active_policy_summary) {
                                                     setPublishConfirmOpen(true);
                                                 } else {
@@ -511,9 +536,37 @@ export default function Policy() {
                                                     : "bg-primary text-primary-foreground hover:bg-primary/90"
                                             )}
                                         >
-                                            {activateMutation.isPending ? "Processing..." : activationSuccess ? "Success!" : (system as any)?.active_policy_summary ? "Review & Publish" : "Activate Policy"}
+                                            {activateMutation.isPending ? "Publishing..." : activationSuccess ? "Saved!" : (system as any)?.active_policy_summary ? "Review & Publish" : "Activate Policy"}
                                             {activationSuccess && <Check className="ml-2 h-4 w-4" />}
                                         </button>
+
+                                        {activationError && (
+                                            <div className="bg-destructive/10 border border-destructive/30 rounded p-2.5 flex items-start gap-2">
+                                                <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs font-semibold text-destructive">Publish failed</p>
+                                                    <p className="text-2xs text-destructive/90 break-words">{activationError}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => setActivationError(null)}
+                                                    className="text-destructive/70 hover:text-destructive shrink-0"
+                                                >
+                                                    <X className="h-3.5 w-3.5" />
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {!activationError && lastSavedThreshold !== null && lastSavedAt && (
+                                            <div className="bg-up/5 border border-up/20 rounded p-2.5 flex items-start gap-2">
+                                                <Check className="h-4 w-4 text-up shrink-0 mt-0.5" />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs font-semibold text-up">Saved at {lastSavedAt}</p>
+                                                    <p className="text-2xs text-muted-foreground">
+                                                        Active threshold: <span className="font-mono text-foreground">{lastSavedThreshold.toFixed(4)}</span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </>
                             )}

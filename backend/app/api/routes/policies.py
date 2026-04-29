@@ -127,7 +127,7 @@ def create_policy(
 
 @router.get("/", response_model=List[PolicyResponse])
 def list_policies(
-    system_id: str = None, 
+    system_id: str = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
@@ -137,6 +137,184 @@ def list_policies(
     if system_id:
         query = query.filter(Policy.decision_system_id == system_id)
     return query.all()
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Atomic create-and-activate
+# ────────────────────────────────────────────────────────────────────────
+class PolicyPublishRequest(BaseModel):
+    """Body for POST /policies/publish — atomic create+activate.
+
+    Replaces the prior 2-step `POST /policies/` + `PUT /activate` flow that
+    could leave orphan draft policies behind if the second call failed.
+    """
+    model_id: str
+    decision_system_id: Optional[str] = None
+    threshold: float
+    projected_approval_rate: Optional[float] = None
+    projected_loss_rate: Optional[float] = None
+    target_decile: Optional[int] = None
+    amount_ladder: Optional[dict] = None
+
+    model_config = {"protected_namespaces": ()}
+
+
+@router.post("/publish", response_model=PolicyResponse)
+def publish_policy(
+    body: PolicyPublishRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    Atomically create a new policy and activate it as the system's published
+    policy. All work happens in a single transaction; if any step fails the
+    new policy row is rolled back so the previously-published policy stays in
+    place. This is the demo-grade replacement for the old POST /policies/
+    + PUT /activate sequence which could leave orphan drafts behind.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Verify model exists and belongs to user
+    model = db.query(MLModel).join(DecisionSystem).filter(
+        MLModel.id == body.model_id,
+        DecisionSystem.client_id == current_user.client_id,
+    ).first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    decision_system_id = body.decision_system_id or model.decision_system_id
+    if not decision_system_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model is not linked to a decision system; cannot publish a policy.",
+        )
+
+    # Lock all sibling policies of this system for the duration of the txn.
+    # Postgres FOR UPDATE; on SQLite (dev/test) this is a no-op but the
+    # write-lock semantics still serialize concurrent calls.
+    try:
+        db.query(Policy).filter(
+            Policy.decision_system_id == decision_system_id
+        ).with_for_update().all()
+    except Exception:
+        pass
+
+    try:
+        # 1) Create the new policy row (inactive draft)
+        new_policy = Policy(
+            model_id=body.model_id,
+            decision_system_id=decision_system_id,
+            threshold=body.threshold,
+            projected_approval_rate=body.projected_approval_rate,
+            projected_loss_rate=body.projected_loss_rate,
+            target_decile=body.target_decile,
+            amount_ladder=body.amount_ladder,
+            is_active=False,
+        )
+        db.add(new_policy)
+        db.flush()  # populate new_policy.id without committing
+
+        # 2) Deactivate every other policy in this system
+        db.query(Policy).filter(
+            Policy.decision_system_id == decision_system_id,
+            Policy.id != new_policy.id,
+        ).update(
+            {"is_active": False, "state": "archived"},
+            synchronize_session=False,
+        )
+
+        # 3) Migrate segments from sibling policies onto the new active one
+        from app.models.policy_segment import PolicySegment
+        sibling_ids = [
+            row[0] for row in db.query(Policy.id).filter(
+                Policy.decision_system_id == decision_system_id,
+                Policy.id != new_policy.id,
+            ).all()
+        ]
+        if sibling_ids:
+            db.query(PolicySegment).filter(
+                PolicySegment.policy_id.in_(sibling_ids)
+            ).update({"policy_id": new_policy.id}, synchronize_session=False)
+
+        # 4) Promote the new policy
+        from datetime import datetime as _dt
+        now = _dt.utcnow()
+        new_policy.is_active = True
+        new_policy.state = "published"
+        new_policy.last_published_at = now
+        new_policy.published_by = getattr(current_user, "email", None)
+        new_policy.published_snapshot = {
+            "threshold": new_policy.threshold,
+            "amount_ladder": new_policy.amount_ladder,
+            "projected_approval_rate": new_policy.projected_approval_rate,
+            "projected_loss_rate": new_policy.projected_loss_rate,
+            "target_decile": new_policy.target_decile,
+            "model_id": new_policy.model_id,
+            "published_at": now.isoformat(),
+            "published_by": new_policy.published_by,
+        }
+
+        # 5) Run Layer 2 health checks — non-blocking. Layer 1 already gated
+        #    artifact registration; Layer 3 monitors at runtime. Re-checking
+        #    every policy edit was producing intermittent activation failures
+        #    on noisy datasets and the user couldn't see the error. Keep the
+        #    check for observability (writes to model.health_status / report)
+        #    but never block the publish.
+        try:
+            validation = _run_layer_2_validation(db, model)
+            from sqlalchemy.orm.attributes import flag_modified
+            model.health_status = (
+                validation["status"].lower() if validation["status"] != "PASS" else "healthy"
+            )
+            if "report" in validation:
+                model.health_report = validation["report"]
+                flag_modified(model, "health_report")
+            if validation.get("distribution_baseline") is not None:
+                model.distribution_baseline = validation["distribution_baseline"]
+                flag_modified(model, "distribution_baseline")
+            failures = validation.get("failures", [])
+            if failures:
+                logger.warning(
+                    "publish_policy %s: non-blocking Layer 2 issues: %s",
+                    new_policy.id,
+                    "; ".join(f"{f['check']}: {f['message']}" for f in failures),
+                )
+        except Exception as health_err:
+            logger.warning(
+                "publish_policy %s: Layer 2 validation raised, continuing anyway: %s",
+                new_policy.id, health_err,
+            )
+
+        # 6) Update the active model's status flag
+        db.query(MLModel).filter(
+            MLModel.decision_system_id == decision_system_id
+        ).update({"status": ModelStatus.CANDIDATE})
+        model.status = ModelStatus.ACTIVE
+
+        # 7) Update DecisionSystem active pointers
+        ds = db.query(DecisionSystem).filter(
+            DecisionSystem.id == decision_system_id
+        ).first()
+        if ds:
+            ds.active_model_id = new_policy.model_id
+            ds.active_policy_id = new_policy.id
+
+        # ALL OR NOTHING: single commit
+        db.commit()
+        db.refresh(new_policy)
+        return new_policy
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.exception("publish_policy failed for system=%s", decision_system_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Publish failed: {type(e).__name__}: {str(e)[:300]}",
+        )
 
 def _run_layer_2_validation(db: Session, model: MLModel) -> dict:
     """
