@@ -144,6 +144,37 @@ export default function EngineBacktest() {
                 </div>
             )}
 
+            {/* Empty state when no runs exist yet */}
+            {runs && runs.length === 0 && !activeRun && (
+                <div className="panel p-12 text-center">
+                    <div className="icon-box bg-info/10 mx-auto mb-4">
+                        <Play className="h-6 w-6 text-info" />
+                    </div>
+                    <h3 className="text-base font-semibold mb-2">No backtests yet</h3>
+                    <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
+                        A backtest replays your active model and policy on every row of
+                        the input file, capturing decisions, latency, and calibration
+                        metrics. Same code path as production.
+                    </p>
+                    <button
+                        onClick={() => startMutation.mutate()}
+                        disabled={startMutation.isPending || !(system as any)?.active_policy_id}
+                        className="btn-primary inline-flex items-center gap-2"
+                    >
+                        {startMutation.isPending ? (
+                            <><Loader2 className="h-4 w-4 animate-spin" /> Running...</>
+                        ) : (
+                            <><Play className="h-4 w-4" /> Run your first backtest</>
+                        )}
+                    </button>
+                    {!(system as any)?.active_policy_id && (
+                        <p className="text-2xs text-muted-foreground mt-3">
+                            Publish an active policy first to enable backtesting.
+                        </p>
+                    )}
+                </div>
+            )}
+
             {/* Run history */}
             {runs && runs.length > 0 && !activeRun && (
                 <div className="panel">

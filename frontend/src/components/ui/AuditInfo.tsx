@@ -79,6 +79,11 @@ export function AuditInfo({
                 <div className="flex items-center gap-2">
                     <Info className="h-3.5 w-3.5 text-info" />
                     <span className="text-xs font-semibold text-foreground">Audit info</span>
+                    {!open && (
+                        <span className="text-[10px] text-muted-foreground italic">
+                            click to verify dataset, model, and policy versions
+                        </span>
+                    )}
                     {meta.computed_at && (
                         <span className="text-[10px] text-muted-foreground font-mono">
                             · {formatTimestamp(meta.computed_at)}
