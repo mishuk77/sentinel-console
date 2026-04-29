@@ -374,42 +374,17 @@ class TrainingService:
                           f"{self._display_name(name)} failed after {elapsed}s: {str(e)[:100]}")
                 continue
 
-            # ── Post-hoc probability calibration ────────────────────────
-            # When class_weight="balanced" is in effect (imbalanced
-            # datasets, minority < 15%), sklearn re-weights the loss such
-            # that the model's raw probability outputs are systematically
-            # inflated — predicted mean lands near 0.5 instead of the true
-            # base rate. Ranking (AUC) is preserved, but calibration is
-            # broken by design.
-            #
-            # CalibratedClassifierCV with isotonic regression remaps the
-            # base model's raw scores to calibrated probabilities without
-            # losing ranking power. cv=3 fits 3 calibrators on
-            # cross-validated folds and averages — robust against
-            # overfitting on a single calibration set.
-            #
-            # Only applied when class_weight is in effect — for balanced
-            # datasets the base model is already calibrated.
-            if class_weight_setting == "balanced" and param_dist:
-                from sklearn.calibration import CalibratedClassifierCV
-                t_cal = time.time()
-                try:
-                    calibrated_clf = CalibratedClassifierCV(
-                        clf, method="isotonic", cv=3,
-                    )
-                    calibrated_clf.fit(X_tr, y_train)
-                    clf = calibrated_clf
-                    cal_elapsed = round(time.time() - t_cal, 1)
-                    self.emit(job_id, f"calibrate_{name}", "done",
-                              f"{self._display_name(name)} probabilities calibrated "
-                              f"with isotonic regression in {cal_elapsed}s "
-                              f"(class_weight=balanced inflates raw outputs; "
-                              f"calibration restores correct probability scale)")
-                except Exception as cal_err:
-                    logger.warning(
-                        f"Calibration of {name} failed: {cal_err} — "
-                        f"using raw model. Health check may flag miscalibration."
-                    )
+            # NOTE: a previous iteration wrapped the trained classifier
+            # in CalibratedClassifierCV(method="isotonic") to fix H5
+            # calibration FAILs on imbalanced class-weighted data.
+            # That step compressed the prediction-score distribution
+            # into a narrow range and broke the score-cutoff slider on
+            # the Policy page (every applicant ended up with a similar
+            # score, so the slider couldn't meaningfully discriminate).
+            # We removed it and went back to raw class-weighted models.
+            # Calibration may still flag in the health report; the
+            # diagnostic-not-gating policy means the artifact saves
+            # anyway and the user retains full slider control.
 
             # Hold-out evaluation
             preds = clf.predict_proba(X_te)[:, 1]
