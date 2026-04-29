@@ -255,36 +255,13 @@ def publish_policy(
             "published_by": new_policy.published_by,
         }
 
-        # 5) Run Layer 2 health checks — non-blocking. Layer 1 already gated
-        #    artifact registration; Layer 3 monitors at runtime. Re-checking
-        #    every policy edit was producing intermittent activation failures
-        #    on noisy datasets and the user couldn't see the error. Keep the
-        #    check for observability (writes to model.health_status / report)
-        #    but never block the publish.
-        try:
-            validation = _run_layer_2_validation(db, model)
-            from sqlalchemy.orm.attributes import flag_modified
-            model.health_status = (
-                validation["status"].lower() if validation["status"] != "PASS" else "healthy"
-            )
-            if "report" in validation:
-                model.health_report = validation["report"]
-                flag_modified(model, "health_report")
-            if validation.get("distribution_baseline") is not None:
-                model.distribution_baseline = validation["distribution_baseline"]
-                flag_modified(model, "distribution_baseline")
-            failures = validation.get("failures", [])
-            if failures:
-                logger.warning(
-                    "publish_policy %s: non-blocking Layer 2 issues: %s",
-                    new_policy.id,
-                    "; ".join(f"{f['check']}: {f['message']}" for f in failures),
-                )
-        except Exception as health_err:
-            logger.warning(
-                "publish_policy %s: Layer 2 validation raised, continuing anyway: %s",
-                new_policy.id, health_err,
-            )
+        # 5) Layer 2 health checks intentionally NOT run here. They load the
+        #    dataset and score it through the model, which on a real-world
+        #    dataset routinely exceeds Railway's ~30s gateway timeout — the
+        #    publish then comes back to the client as a Network Error even
+        #    though the DB transaction would have committed fine. Layer 1
+        #    already gated training; Layer 3 monitors at runtime. Layer 2
+        #    can be run on demand from the model page.
 
         # 6) Update the active model's status flag
         db.query(MLModel).filter(
