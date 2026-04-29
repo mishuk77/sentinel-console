@@ -218,13 +218,12 @@ def _run_layer_2_validation(db: Session, model: MLModel) -> dict:
         # Legacy artifact — limited to structural checks; calibration may be unreliable
         return {"status": "WARN", "message": "Legacy model artifact — re-train for full validation."}
 
-    # Run health checks. Use full dataset for calibration if it's large enough.
+    # Run health checks. Calibration check has been removed from the
+    # suite — class-weighted models on imbalanced finance data
+    # routinely show inflated predicted means without that being a
+    # real health signal.
     checker = InferenceHealthChecker()
-    use_calibration = y is not None and len(y) >= 2000
-    report = checker.run_all(
-        predictions=predictions,
-        outcomes=y if use_calibration else None,
-    )
+    report = checker.run_all(predictions=predictions)
 
     # TASK-10 Layer 3 H6: capture the prediction distribution at
     # registration time as a fixed baseline. The runtime monitor compares

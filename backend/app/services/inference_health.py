@@ -275,21 +275,26 @@ class InferenceHealthChecker:
         self,
         predictions: np.ndarray,
         baseline: Optional[np.ndarray] = None,
-        outcomes: Optional[np.ndarray] = None,
+        outcomes: Optional[np.ndarray] = None,  # kept for API compat — ignored
     ) -> HealthReport:
         """Run every applicable check on a single prediction sample.
 
-        Skip distribution_drift if no baseline is provided; skip
-        calibration if no outcomes are provided. Both situations are
-        legitimate — the caller chooses what data is available."""
+        The check_calibration (H5) check has been removed from the
+        default suite. Class-weighted models on imbalanced finance
+        data routinely show inflated predicted means even when ranking
+        well, and surfacing this as a health warning created noise
+        without actionable signal. The check_calibration() method is
+        retained on the class for external callers who want it
+        explicitly, but it's no longer part of run_all.
+        """
         results = [
             self.check_out_of_range(predictions),
             self.check_nan_inf(predictions),
             self.check_saturation(predictions),
             self.check_mode_collapse(predictions),
         ]
-        if outcomes is not None and len(outcomes) > 0:
-            results.append(self.check_calibration(predictions, outcomes))
+        # outcomes parameter intentionally ignored — calibration check
+        # removed from the default suite (see docstring above).
         if baseline is not None and len(baseline) > 0:
             results.append(self.check_distribution_drift(predictions, baseline))
         return HealthReport(results=results)

@@ -20,7 +20,6 @@ const CHECK_NAMES: Record<string, string> = {
     nan_inf: "NaN / Inf",
     saturation: "Saturation",
     mode_collapse: "Mode collapse",
-    calibration: "Calibration error",
     distribution_drift: "Distribution drift",
 };
 
@@ -29,7 +28,6 @@ const CHECK_DESCRIPTIONS: Record<string, string> = {
     nan_inf: "Predictions must be finite.",
     saturation: "Catches the LR-bug class — % of predictions pegged at 0 or 1.",
     mode_collapse: "Std of predictions; near-zero means the model predicts the same value for everything.",
-    calibration: "|mean(predicted) − mean(observed)|. Catches wildly miscalibrated models.",
     distribution_drift: "KS statistic vs. registration baseline. Catches feature pipeline regressions.",
 };
 

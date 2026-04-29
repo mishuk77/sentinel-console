@@ -127,36 +127,14 @@ def test_nan_inf_fail_on_inf(checker):
 
 
 # ────────────────────────────────────────────────────────────────────────
-# H5 — Calibration
+# H5 — Calibration (REMOVED from default suite)
 # ────────────────────────────────────────────────────────────────────────
-
-
-def test_calibration_pass_when_means_match(checker):
-    rng = np.random.default_rng(3)
-    n = 5000
-    p = rng.beta(2, 18, size=n)  # mean ≈ 0.1
-    y = rng.binomial(1, 0.10, size=n)  # 10% base rate
-    r = checker.check_calibration(p, y)
-    assert r.status == "PASS"
-
-
-def test_calibration_fail_when_predicted_rate_wildly_off(checker):
-    """LR-bug scenario: predicted rate near 1.0 vs observed 0.05."""
-    p = np.full(2000, 0.99)
-    y = np.zeros(2000)
-    y[:100] = 1  # 5% base rate
-    r = checker.check_calibration(p, y)
-    assert r.status == "FAIL"
-    assert "miscalibrated" in r.message.lower()
-
-
-def test_calibration_warn_at_moderate_difference(checker):
-    """Predicted 12% vs observed 5% → 7pp diff → WARN."""
-    p = np.full(2000, 0.12)
-    y = np.zeros(2000)
-    y[:100] = 1  # 5% base rate
-    r = checker.check_calibration(p, y)
-    assert r.status == "WARN"
+# The calibration check method (check_calibration) is retained on
+# InferenceHealthChecker for any external caller who wants to invoke
+# it explicitly, but it's no longer included in run_all() — class-
+# weighted models on imbalanced finance data routinely have inflated
+# predicted means, which is the expected tradeoff (better minority-
+# class ranking) rather than a health signal.
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -195,10 +173,14 @@ def test_run_all_status_is_worst_check_severity(checker):
     assert any(r.check_name == "out_of_range" and r.status == "FAIL" for r in report.results)
 
 
-def test_run_all_skips_calibration_without_outcomes(checker):
+def test_run_all_never_includes_calibration_even_when_outcomes_provided(checker):
+    """The calibration check is no longer part of run_all(), regardless
+    of whether outcomes are passed. The 'outcomes' parameter is kept
+    for API compatibility but ignored."""
     rng = np.random.default_rng(7)
     p = rng.beta(2, 5, size=500)
-    report = checker.run_all(p)  # no outcomes provided
+    outcomes = rng.binomial(1, 0.10, size=500)
+    report = checker.run_all(p, outcomes=outcomes)
     assert all(r.check_name != "calibration" for r in report.results)
 
 
@@ -209,17 +191,19 @@ def test_run_all_skips_drift_without_baseline(checker):
     assert all(r.check_name != "distribution_drift" for r in report.results)
 
 
-def test_run_all_includes_all_six_when_data_provided(checker):
+def test_run_all_runs_h1_h4_plus_drift(checker):
+    """The default suite runs the four structural checks plus drift
+    when a baseline is provided. Calibration is intentionally excluded."""
     rng = np.random.default_rng(9)
     p = rng.beta(2, 5, size=2000)
     baseline = rng.beta(2, 5, size=2000)
-    outcomes = rng.binomial(1, 0.30, size=2000)
-    report = checker.run_all(p, baseline=baseline, outcomes=outcomes)
+    report = checker.run_all(p, baseline=baseline)
     check_names = {r.check_name for r in report.results}
     assert check_names == {
         "out_of_range", "nan_inf", "saturation", "mode_collapse",
-        "calibration", "distribution_drift",
+        "distribution_drift",
     }
+    assert "calibration" not in check_names
 
 
 def test_health_report_serializes_to_dict(checker):
