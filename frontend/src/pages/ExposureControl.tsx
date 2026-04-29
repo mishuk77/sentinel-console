@@ -55,16 +55,6 @@ export default function ExposureControl() {
         enabled: !!systemId
     });
 
-    // TASK-11F: pull dataset annotations to surface segmenting dimensions
-    const { data: datasets } = useQuery<any[]>({
-        queryKey: ["datasets", systemId],
-        queryFn: async () => {
-            const res = await api.get("/datasets/", { params: { system_id: systemId } });
-            return res.data;
-        },
-        enabled: !!systemId,
-    });
-
     const { data: policies } = useQuery({
         queryKey: ["policies", systemId],
         queryFn: async () => {
