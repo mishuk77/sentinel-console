@@ -342,14 +342,63 @@ def list_segments(
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
-    _get_policy_authorized(policy_id, db, current_user)
+    """
+    List the segments for the requested policy.
+
+    Architectural note: per product intent, segments belong to the *decision
+    system*, not to a specific policy revision — they layer on top of whatever
+    global policy is currently active. Each global-policy edit creates a fresh
+    Policy row and the activate route migrates segments onto it. This listing
+    endpoint adds a safety net: if the requested policy has no segments but a
+    sibling policy in the same decision system does, we adopt those segments
+    onto the requested policy and return them. This guarantees the user never
+    loses segment configuration to a stranded-orphan edge case.
+    """
+    policy = _get_policy_authorized(policy_id, db, current_user)
     segments = (
         db.query(PolicySegment)
         .filter(PolicySegment.policy_id == policy_id, PolicySegment.is_active == True)
         .order_by(PolicySegment.n_samples.desc())
         .all()
     )
-    return segments
+    if segments or not policy.decision_system_id:
+        return segments
+
+    # Fallback: pull orphan segments from sibling policies of the same system.
+    sibling_ids = [
+        row[0] for row in db.query(Policy.id).filter(
+            Policy.decision_system_id == policy.decision_system_id,
+            Policy.id != policy_id,
+        ).all()
+    ]
+    if not sibling_ids:
+        return segments
+    orphan_count = (
+        db.query(PolicySegment)
+        .filter(
+            PolicySegment.policy_id.in_(sibling_ids),
+            PolicySegment.is_active == True,
+        )
+        .count()
+    )
+    if orphan_count == 0:
+        return segments
+    db.query(PolicySegment).filter(
+        PolicySegment.policy_id.in_(sibling_ids),
+        PolicySegment.is_active == True,
+    ).update({"policy_id": policy_id}, synchronize_session=False)
+    db.commit()
+    import logging
+    logging.getLogger(__name__).info(
+        "list_segments fallback: adopted %d orphan segment(s) onto policy=%s",
+        orphan_count, policy_id,
+    )
+    return (
+        db.query(PolicySegment)
+        .filter(PolicySegment.policy_id == policy_id, PolicySegment.is_active == True)
+        .order_by(PolicySegment.n_samples.desc())
+        .all()
+    )
 
 
 @router.post("/{policy_id}/segments", response_model=SegmentResponse)
