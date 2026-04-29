@@ -475,7 +475,10 @@ async def get_segment_calibration(
             os.remove(temp_path)
 
     # ── Determine label column (TASK-6: prefer model.target_column) ────────────
-    from app.models.ml_model import MLModel
+    # NOTE: do not re-import MLModel here. The module-level import is in scope;
+    # a function-local `from ... import MLModel` would make MLModel a local
+    # variable for the whole function and break earlier `db.query(MLModel)`
+    # calls with UnboundLocalError.
     metadata = dataset.metadata_info or {}
     latest_model = (
         db.query(MLModel)
@@ -613,7 +616,10 @@ async def _calibrate_segments_impl(
             os.remove(temp_path)
 
     # ── Determine label column (TASK-6: prefer model.target_column) ────────────
-    from app.models.ml_model import MLModel
+    # NOTE: do not re-import MLModel here. The module-level import is in scope;
+    # a function-local `from ... import MLModel` would make MLModel a local
+    # variable for the whole function and break earlier `db.query(MLModel)`
+    # calls with UnboundLocalError.
     metadata = dataset.metadata_info or {}
     latest_model = (
         db.query(MLModel)
