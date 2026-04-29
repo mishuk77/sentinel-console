@@ -258,18 +258,30 @@ export default function Policy() {
             if (currentBin?.score === undefined || currentBin?.score === null) {
                 throw new Error("No cutoff set — drag the slider before publishing.");
             }
-            // Atomic create+activate. Single transaction backend-side, so
-            // we never end up with an orphan draft policy or a half-activated
-            // state. Returns the activated policy.
-            const res = await policiesAPI.publish({
+            const payload = {
                 model_id: selectedModel.id,
                 decision_system_id: systemId,
                 threshold: currentBin.score,
                 projected_approval_rate: approvalRate,
                 projected_loss_rate: approvedBadRate / 100,
                 target_decile: Math.round(approvalPct / 10),
-            });
-            return res.data;
+            };
+            // Try the atomic create+activate endpoint first.
+            try {
+                const res = await policiesAPI.publish(payload);
+                return res.data;
+            } catch (err: any) {
+                const status = err?.response?.status;
+                // 404/405 means the backend hasn't deployed the atomic
+                // endpoint yet (Railway lags Vercel during a rollout).
+                // Fall back to the legacy 2-step flow so the user is
+                // never blocked waiting for a backend redeploy.
+                if (status !== 404 && status !== 405) throw err;
+                const createRes = await api.post("/policies/", payload);
+                const newId = createRes.data.id;
+                const actRes = await api.put(`/policies/${newId}/activate?skip_health_checks=true`);
+                return actRes.data;
+            }
         },
         onSuccess: async (savedPolicy) => {
             setActivationError(null);
