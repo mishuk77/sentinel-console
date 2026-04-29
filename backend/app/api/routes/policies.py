@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
@@ -37,9 +38,13 @@ class PolicyResponse(BaseModel):
     amount_ladder: Optional[dict] = None
     is_active: bool
     # TASK-11E / TASK-2: surface state and audit fields so the UI can show
-    # "Last saved" / "Published" indicators.
+    # "Last saved" / "Published" indicators. last_published_at is a datetime
+    # in the DB; Pydantic v2 serializes it to ISO 8601 automatically. Typing
+    # it as str (the previous declaration) made GET /policies/ 500 for any
+    # system with a published policy because Pydantic refused to coerce
+    # datetime → str under from_attributes=True.
     state: Optional[str] = None
-    last_published_at: Optional[str] = None
+    last_published_at: Optional[datetime] = None
     published_by: Optional[str] = None
 
     model_config = {"protected_namespaces": (), "from_attributes": True}

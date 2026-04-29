@@ -340,12 +340,18 @@ def step_dataset_preview(state: State) -> bool:
 
 
 def step_dataset_profile(state: State) -> bool:
+    # The profile endpoint requires target_col so it can compute IV / WoE
+    # against a specific binary outcome. We pull it from the active model
+    # if available, falling back to common defaults.
+    target_col = (state.model or {}).get("target_column") or "charge_off"
     res = _call(state, "GET", f"/datasets/{state.dataset_id}/profile",
-                step="datasets.profile", expected=(200, 404))
+                params={"target_col": target_col},
+                step="datasets.profile", expected=(200, 404, 400, 422))
     if res is None:
         return False
-    if res.status_code == 404:
-        _info(state, "datasets.profile", "no profile yet (404) - generate from UI")
+    if res.status_code in (404, 400, 422):
+        _info(state, "datasets.profile",
+              f"{res.status_code} - profile may need target_col annotated correctly")
         return True
     body = res.json()
     n_features = len(body.get("columns") or body.get("features") or [])
@@ -1080,8 +1086,12 @@ def step_fraud_analytics(state: State) -> bool:
 
 
 def step_fraud_tiers_global(state: State) -> bool:
-    """Global fraud tier config (separate from /systems/{id}/fraud/...)."""
+    """Global fraud tier config (separate from /systems/{id}/fraud/...).
+
+    Requires ?system_id=... query parameter, otherwise 422.
+    """
     res = _call(state, "GET", "/fraud/tiers",
+                params={"system_id": state.system_id},
                 step="fraud.tiers",
                 expected=(200, 404))
     if res is None:
@@ -1174,17 +1184,19 @@ ALL_STEPS: list[tuple[str, Callable[[State], bool], bool, str]] = [
     ("systems.list",              step_systems_list,              True,  "systems"),
     ("systems.get",                step_systems_get,               False, "systems"),
 
-    # Datasets
+    # Datasets (basic listing first; profile needs the model's target_col)
     ("datasets.list",             step_datasets_list,             True,  "datasets"),
     ("datasets.preview",          step_dataset_preview,           False, "datasets"),
-    ("datasets.profile",          step_dataset_profile,           False, "datasets"),
     ("datasets.segment_columns",  step_dataset_segment_columns,   False, "datasets"),
 
-    # Models
+    # Models (needed before datasets.profile so target_col is in scope)
     ("models.list",               step_models_list,               True,  "models"),
     ("models.get",                 step_model_get,                 False, "models"),
     ("models.risk_amount_matrix",  step_model_risk_amount_matrix,  False, "models"),
     ("models.documentation",       step_model_documentation,       False, "models"),
+
+    # Datasets — profile (depends on the model's target_col)
+    ("datasets.profile",          step_dataset_profile,           False, "datasets"),
 
     # Policies
     ("policies.list",              step_policies_list,             False, "policies"),
