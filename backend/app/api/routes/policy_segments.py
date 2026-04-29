@@ -115,30 +115,81 @@ def _resolve_fallback(segment: PolicySegment, all_segments: list) -> Optional[st
 
 # ─── Inference helpers ───────────────────────────────────────────────────────
 
-def _predict_proba_from_artifact(artifact, X_seg):
+def _predict_proba_from_artifact(artifact, X_raw):
     """
     Produce P(positive) scores from a loaded model artifact.
-    Handles three cases:
-      1. Raw sklearn model (has predict_proba)
-      2. Individual model dict: {"model": clf, "scaler": scaler, "columns": [...]}
-      3. Ensemble meta dict:   {"type": ..., "components": [...], "weights": [...]}
-         — for ensembles, component models must already be loaded via _load_ensemble_components.
+
+    `X_raw` is a DataFrame of the *original* feature columns (id and target
+    already stripped). Schema v2 artifacts carry their own preprocessor and
+    encode internally; legacy artifacts get the legacy get_dummies + reindex
+    treatment.
+
+    Handles four cases:
+      1. Schema v2 dict: {"schema_version": 2, "model", "preprocessor",
+         "scaler", "use_scaled", "columns"}  — runs preprocessor.transform
+         on raw X, optionally scales, then predict_proba.
+      2. Legacy individual model dict: {"model": clf, "scaler", "columns"}
+         — get_dummies on the fly + reindex to training columns.
+      3. Raw sklearn model (has predict_proba directly).
+      4. Ensemble meta dict: {"components": [...], "weights": [...],
+         "loaded_components": {...}}.
     """
     import numpy as np
+    import pandas as pd
 
-    # Case 1: raw sklearn model
+    # Case 1: Schema v2 — preprocessor + use_scaled
+    if isinstance(artifact, dict) and artifact.get("schema_version") == 2 and "preprocessor" in artifact:
+        clf = artifact["model"]
+        preprocessor = artifact["preprocessor"]
+        scaler = artifact.get("scaler")
+        use_scaled = artifact.get("use_scaled", False)
+
+        X_processed = preprocessor.transform(X_raw)
+        if use_scaled and scaler is not None:
+            X_final = pd.DataFrame(
+                scaler.transform(X_processed),
+                columns=X_processed.columns,
+                index=X_processed.index,
+            )
+        else:
+            X_final = X_processed
+        return clf.predict_proba(X_final)[:, 1]
+
+    # Case 3: raw sklearn model
     if hasattr(artifact, "predict_proba"):
-        return artifact.predict_proba(X_seg)[:, 1]
+        X_input = X_raw
+        if hasattr(artifact, "feature_names_in_"):
+            # Best-effort: get_dummies first, then reindex to feature names
+            X_input = pd.get_dummies(X_raw, dummy_na=True).fillna(0)
+            X_input = X_input.reindex(columns=artifact.feature_names_in_, fill_value=0)
+        return artifact.predict_proba(X_input)[:, 1]
 
     if not isinstance(artifact, dict):
         raise ValueError(f"Unsupported artifact type: {type(artifact)}")
 
-    # Case 2: individual model wrapper dict
+    # Case 4: ensemble meta — components are nested artifacts
+    if "components" in artifact and "weights" in artifact:
+        loaded = artifact.get("loaded_components")
+        if not loaded:
+            raise ValueError(
+                "Ensemble artifact requires loaded component models. "
+                "Call _load_model_artifact first."
+            )
+        weights = artifact["weights"]
+        component_names = artifact["components"]
+        scores = np.zeros(len(X_raw))
+        for name, w in zip(component_names, weights):
+            comp = loaded[name]
+            comp_scores = _predict_proba_from_artifact(comp, X_raw)
+            scores += w * comp_scores
+        return scores
+
+    # Case 2: legacy individual model wrapper dict — encode here, then reindex
     if "model" in artifact:
         model = artifact["model"]
         scaler = artifact.get("scaler")
         columns = artifact.get("columns")
-        X_input = X_seg.copy()
+        X_input = pd.get_dummies(X_raw, dummy_na=True).fillna(0)
         if columns:
             for col in columns:
                 if col not in X_input.columns:
@@ -148,34 +199,20 @@ def _predict_proba_from_artifact(artifact, X_seg):
             X_input = scaler.transform(X_input)
         return model.predict_proba(X_input)[:, 1]
 
-    # Case 3: ensemble meta — requires "loaded_components" key injected by caller
-    if "components" in artifact and "weights" in artifact:
-        loaded = artifact.get("loaded_components")
-        if not loaded:
-            raise ValueError(
-                "Ensemble artifact requires loaded component models. "
-                "Call _load_ensemble_components first."
-            )
-        weights = artifact["weights"]
-        component_names = artifact["components"]
-        scores = np.zeros(len(X_seg))
-        for name, w in zip(component_names, weights):
-            comp = loaded[name]
-            comp_scores = _predict_proba_from_artifact(comp, X_seg)
-            scores += w * comp_scores
-        return scores
-
     raise ValueError(f"Unrecognised artifact dict keys: {list(artifact.keys())}")
 
 
-def _score_segment(X_encoded, y, seg_mask, artifact):
+def _score_segment(X_raw, y, seg_mask, artifact):
     """
-    Filter X_encoded/y to seg_mask rows, score with the model artifact, bin into deciles.
+    Filter X_raw/y to seg_mask rows, score with the model artifact, bin into deciles.
+    `X_raw` is the original feature DataFrame (not one-hot encoded). The artifact
+    helper handles schema-specific encoding internally.
+
     Returns list of calibration dicts or None if not enough data.
     """
     import pandas as pd
 
-    X_seg = X_encoded[seg_mask.values].copy()
+    X_seg = X_raw[seg_mask.values].copy()
     y_seg = y[seg_mask.values]
     n = len(X_seg)
     if n < 10:
@@ -460,21 +497,16 @@ async def get_segment_calibration(
             else:
                 mask = pd.Series([False] * len(df))
 
-    # ── Apply same preprocessing as training.py ───────────────────────────────
+    # ── Build raw feature matrix (schema-aware encoding happens later) ────────
+    # Schema v2 artifacts replay their training preprocessor on RAW columns;
+    # legacy artifacts get one-hot encoded inside _predict_proba_from_artifact.
     exclude_lower = {"id", "customer_id", "created_at", "applicant_id", "uuid", "name", "email", "phone", label_col.lower()}
     cols = [
         c for c in df.columns
         if c.lower() not in exclude_lower and not c.lower().endswith("id")
     ]
-    X = df[cols]
+    X = df[cols].copy()
     y = df[label_col]
-
-    for col in X.select_dtypes(include=["object", "string"]).columns:
-        if X[col].nunique() > 50:
-            X = X.drop(columns=[col])
-
-    X = pd.get_dummies(X, dummy_na=True)
-    X = X.fillna(0)
 
     n = int(mask.sum())
 
@@ -629,7 +661,10 @@ async def calibrate_segments(
     if model.artifact_path:
         target = body.target_bad_rate  # may be None
 
-        # Build encoded feature matrix once for the full dataset
+        # Build raw feature matrix once. Schema v2 artifacts replay their
+        # training preprocessor inside _predict_proba_from_artifact, so we
+        # must NOT one-hot encode here — doing so strips the original
+        # categorical columns the preprocessor expects (e.g. `state`).
         exclude_lower = {
             "id", "customer_id", "created_at", "applicant_id",
             "uuid", "name", "email", "phone", label_col.lower()
@@ -638,20 +673,17 @@ async def calibrate_segments(
             c for c in df.columns
             if c.lower() not in exclude_lower and not c.lower().endswith("id")
         ]
-        X_full = df[cols]
+        X_full = df[cols].copy()
         y_full = df[label_col]
-
-        for col in X_full.select_dtypes(include=["object", "string"]).columns:
-            if X_full[col].nunique() > 50:
-                X_full = X_full.drop(columns=[col])
-
-        X_full = pd.get_dummies(X_full, dummy_na=True)
-        X_full = X_full.fillna(0)
 
         # Load model artifact once (handles individual models, ensemble meta-dicts, etc.)
         try:
             artifact = _load_model_artifact(model.artifact_path, model, db, storage)
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Segment calibration: failed to load model artifact: %s", e
+            )
             artifact = None
 
         if artifact is not None:
@@ -659,7 +691,14 @@ async def calibrate_segments(
                 mask = seg_masks.get(seg.id)
                 if mask is None:
                     continue
-                cal = _score_segment(X_full, y_full, mask, artifact)
+                try:
+                    cal = _score_segment(X_full, y_full, mask, artifact)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Segment %s scoring failed: %s", seg.id, e
+                    )
+                    cal = None
                 if not cal:
                     continue
 

@@ -5,7 +5,7 @@ import { useSystem } from "@/lib/hooks";
 import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
 import {
-    DollarSign, AlertTriangle, Sparkles, RefreshCw, TrendingDown,
+    DollarSign, AlertTriangle, Sparkles, RefreshCw,
     Shield, ArrowRight, Check, Info, ArrowLeft, CheckCircle
 } from "lucide-react";
 import { ImpactTable } from "@/components/simulation/ImpactTable";
@@ -164,37 +164,6 @@ export default function ExposureControl() {
             setIsGeneratingAmounts(false);
         }, 600);
     };
-
-    // --- Impact Simulation: uses actual mean loan amount from feature_stats ---
-    const impactMetrics = useMemo(() => {
-        if (!sortedBins.length || !hasLoanAmountData) return null;
-
-        const totalCount = sortedBins.reduce((s: number, b: any) => s + b.count, 0);
-        if (!totalCount) return null;
-
-        // Current state: everyone gets the mean loan amount from training data
-        const currentEL = sortedBins.reduce((s: number, b: any) =>
-            s + b.count * b.actual_rate * amtMean, 0) / totalCount;
-
-        // Proposed: per-decile limits from ladder
-        const proposedEL = sortedBins.reduce((s: number, b: any) => {
-            const limit = amountLadder[String(b.decile)] ?? amtMean;
-            return s + b.count * b.actual_rate * limit;
-        }, 0) / totalCount;
-
-        const currentAvgAmount = amtMean;
-        const proposedAvgAmount = sortedBins.reduce((s: number, b: any) => {
-            const limit = amountLadder[String(b.decile)] ?? amtMean;
-            return s + b.count * limit;
-        }, 0) / totalCount;
-
-        const lossReduction = currentEL > 0 ? ((currentEL - proposedEL) / currentEL) * 100 : 0;
-        const exposureReduction = currentAvgAmount > 0
-            ? ((currentAvgAmount - proposedAvgAmount) / currentAvgAmount) * 100
-            : 0;
-
-        return { currentAvgAmount, proposedAvgAmount, currentEL, proposedEL, lossReduction, exposureReduction };
-    }, [sortedBins, amountLadder, amtMean, hasLoanAmountData]);
 
     // --- Overlay chart data: real bad rate + proposed limit per bin ---
     const overlayData = useMemo(() =>
@@ -361,7 +330,7 @@ export default function ExposureControl() {
             </div>
 
             {/* TASK-3: Full Impact Table — 3 stages × 10 metrics + delta column */}
-            {activeModel?.dataset_id && activePolicy?.threshold !== undefined && (
+            {activeModel?.dataset_id && activePolicy?.threshold !== undefined ? (
                 <ImpactTable
                     datasetId={activeModel.dataset_id}
                     modelId={activeModel.id}
@@ -374,6 +343,30 @@ export default function ExposureControl() {
                             ?.segmenting_dimensions || []
                     }
                 />
+            ) : (
+                <div className="panel p-6 border-warn/30">
+                    <div className="flex items-start gap-4">
+                        <div className="icon-box bg-warn/10 shrink-0">
+                            <AlertTriangle className="h-4 w-4 text-warn" />
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="text-sm font-semibold mb-1">
+                                Full Impact Analysis unavailable
+                            </h3>
+                            <p className="text-xs text-muted-foreground mb-3">
+                                {!activePolicy
+                                    ? "Activate an approval policy first. The 3-stage impact table compares baseline → policy cuts → policy + ladder, so it needs a published cutoff to render."
+                                    : "The active model is not linked to a dataset. Retrain to populate dataset_id."}
+                            </p>
+                            {!activePolicy && (
+                                <Link to={`/systems/${systemId}/policy`} className="btn-primary btn-sm">
+                                    <ArrowLeft className="h-3.5 w-3.5" />
+                                    Configure approval policy
+                                </Link>
+                            )}
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* TASK-11G + TASK-11H: 'What changed' diff between published policy
@@ -504,11 +497,25 @@ export default function ExposureControl() {
                                 </div>
                             </div>
                         )}
+
+                        {hasLoanAmountData && (
+                            <button
+                                onClick={() => saveMutation.mutate()}
+                                disabled={saveMutation.isPending}
+                                className="btn-primary w-full mt-5 h-10"
+                            >
+                                {saveMutation.isPending ? "Saving…" : saveSuccess ? (
+                                    <>Saved! <Check className="ml-2 h-4 w-4" /></>
+                                ) : (
+                                    <><Shield className="mr-2 h-4 w-4" />Save Exposure Settings</>
+                                )}
+                            </button>
+                        )}
                     </div>
 
                 </div>
 
-                {/* Right: Risk Profile + Impact Simulation */}
+                {/* Right: Risk Profile chart */}
                 <div className="space-y-6">
                 <div className="panel p-5">
                     <div className="flex items-start justify-between mb-1">
@@ -632,68 +639,6 @@ export default function ExposureControl() {
                         </div>
                     )}
                 </div>
-
-                    {/* Impact Simulation */}
-                    {impactMetrics && (
-                        <div className="panel p-5">
-                            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                                <TrendingDown className="h-4 w-4 text-up" />
-                                Impact Simulation
-                            </h3>
-                            <p className="text-xs text-muted-foreground mb-4">
-                                Baseline is the mean loan amount from training data (${Math.round(amtMean).toLocaleString()}).
-                                Impact = expected loss reduction assuming constant approval volume.
-                            </p>
-
-                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                <div className="p-4 bg-muted/20 rounded">
-                                    <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Current (No Limits)</p>
-                                    <p className="text-lg font-bold">${Math.round(impactMetrics.currentAvgAmount).toLocaleString()}</p>
-                                    <p className="text-xs text-muted-foreground">avg. amount</p>
-                                    <p className="text-down font-semibold mt-2 text-sm">
-                                        ${impactMetrics.currentEL.toFixed(0)} exp. loss/app
-                                    </p>
-                                </div>
-                                <div className="p-4 bg-up/5 border border-up/20 rounded">
-                                    <p className="text-xs text-muted-foreground uppercase font-medium mb-1">With Ladder</p>
-                                    <p className="text-lg font-bold">${Math.round(impactMetrics.proposedAvgAmount).toLocaleString()}</p>
-                                    <p className="text-xs text-muted-foreground">avg. amount</p>
-                                    <p className="text-up font-semibold mt-2 text-sm">
-                                        ${impactMetrics.proposedEL.toFixed(0)} exp. loss/app
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="p-4 bg-up/5 border border-up/20 rounded">
-                                <div className="grid grid-cols-2 gap-4 text-center">
-                                    <div>
-                                        <p className="kpi-value text-up">
-                                            -{impactMetrics.lossReduction.toFixed(0)}%
-                                        </p>
-                                        <p className="kpi-label">Expected Loss</p>
-                                    </div>
-                                    <div>
-                                        <p className="kpi-value text-warn">
-                                            -{impactMetrics.exposureReduction.toFixed(0)}%
-                                        </p>
-                                        <p className="kpi-label">Avg. Exposure</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={() => saveMutation.mutate()}
-                                disabled={saveMutation.isPending}
-                                className="btn-primary w-full mt-4 h-10"
-                            >
-                                {saveMutation.isPending ? "Saving…" : saveSuccess ? (
-                                    <>Saved! <Check className="ml-2 h-4 w-4" /></>
-                                ) : (
-                                    <><Shield className="mr-2 h-4 w-4" />Save Exposure Settings</>
-                                )}
-                            </button>
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -852,11 +797,8 @@ export default function ExposureControl() {
                         </div>
                         <p className="text-muted-foreground mb-4">
                             You've configured exposure limits for each risk bin.
-                            {impactMetrics && (
-                                <> Your settings reduce average exposure by{" "}
-                                    <strong>{impactMetrics.exposureReduction.toFixed(0)}%</strong> and
-                                    expected loss by <strong>{impactMetrics.lossReduction.toFixed(0)}%</strong>.</>
-                            )}
+                            See the <strong>Full Impact Analysis</strong> table above for the
+                            modelled effect on approval rate, expected loss, and dollar exposure.
                         </p>
                         <div className="bg-muted/20 rounded p-4 mb-4 border">
                             <p className="text-xs font-semibold mb-2">What's Next?</p>

@@ -134,6 +134,28 @@ function UserMenu() {
     );
 }
 
+function BuildIndicator() {
+    // __BUILD_TIME__ is injected by Vite at build time (see vite.config.ts).
+    // Format DD:HH:MM in UTC so the user can verify the live deploy matches
+    // the latest push.
+    const iso = typeof __BUILD_TIME__ !== "undefined" ? __BUILD_TIME__ : "";
+    if (!iso) return null;
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${pad(d.getUTCDate())}:${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    const full = d.toUTCString();
+    return (
+        <span
+            title={`Build: ${full} (UTC). Format DD:HH:MM`}
+            className="hidden md:inline-flex items-center gap-1 text-2xs font-mono text-muted-foreground/70 px-2 py-0.5 rounded border border-border/60"
+        >
+            <span className="text-muted-foreground/50">Platform last updated</span>
+            <span className="text-foreground/80">{stamp}</span>
+            <span className="text-muted-foreground/40">UTC</span>
+        </span>
+    );
+}
+
 export function TopNav() {
     return (
         <header className="h-12 border-b border-border bg-card flex items-center px-5 sticky top-0 z-50 shrink-0">
@@ -170,6 +192,8 @@ export function TopNav() {
 
             {/* Right controls */}
             <div className="ml-auto flex items-center gap-1">
+                <BuildIndicator />
+                <div className="w-px h-4 bg-border mx-1" />
                 <ThemeToggle />
                 <div className="w-px h-4 bg-border mx-1" />
                 <UserMenu />

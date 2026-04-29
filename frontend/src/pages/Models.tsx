@@ -6,7 +6,6 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { Trophy, BarChart2, X, ArrowRight, Trash2, AlertCircle, GitCompare, Check, Rocket, HelpCircle, CheckCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { HealthStatusBadge } from "@/components/ui/HealthStatusBadge";
 // import { useSystem } from "@/lib/hooks"; // Unused
 
 // Color palette for multi-model comparison
@@ -276,7 +275,6 @@ export default function Models() {
                                     <th className="cursor-pointer hover:text-foreground" onClick={() => handleSort('algorithm')}>Algorithm</th>
                                     <th>Target</th>
                                     <th className="cursor-pointer hover:text-foreground" onClick={() => handleSort('auc')}>AUC</th>
-                                    <th>Health</th>
                                     <th className="cursor-pointer hover:text-foreground" onClick={() => handleSort('status')}>Status</th>
                                     <th className="cursor-pointer hover:text-foreground" onClick={() => handleSort('created_at')}>Trained</th>
                                     <th className="text-right">Actions</th>
@@ -326,13 +324,6 @@ export default function Models() {
                                                     {(m.metrics.auc * 100).toFixed(2)}%
                                                 </span>
                                             ) : "—"}
-                                        </td>
-                                        <td>
-                                            <HealthStatusBadge
-                                                status={m.health_status}
-                                                size="xs"
-                                                layerLabel="Training-time check"
-                                            />
                                         </td>
                                         <td>
                                             <span className={m.status === "ACTIVE" ? "badge badge-green" : "badge badge-amber"}>
