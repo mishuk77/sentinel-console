@@ -187,16 +187,16 @@ export default function EngineBacktest() {
                             <tr>
                                 <th>Run ID</th>
                                 <th>Status</th>
-                                <th>Dataset</th>
+                                <th className="hidden lg:table-cell">Dataset</th>
                                 <th className="text-right">Rows</th>
                                 <th className="text-right">Approved</th>
-                                <th className="text-right" title="Approved $ — only available when dataset has an approved-amount column">Approved $</th>
+                                <th className="text-right hidden md:table-cell" title="Approved $ — only available when dataset has an approved-amount column">Approved $</th>
                                 <th className="text-right" title="AUC on rows with known outcomes">AUC</th>
-                                <th className="text-right" title="Kolmogorov-Smirnov separation between defaulters and non-defaulters">KS</th>
-                                <th className="text-right" title="Brier skill score — improvement over base-rate baseline. Positive = better than baseline">Brier skill</th>
+                                <th className="text-right hidden lg:table-cell" title="Kolmogorov-Smirnov separation between defaulters and non-defaulters">KS</th>
+                                <th className="text-right hidden lg:table-cell" title="Brier skill score — improvement over base-rate baseline. Positive = better than baseline">Brier skill</th>
                                 <th className="text-right" title="Calibration error in pp — |predicted mean − observed mean|">Cal err</th>
-                                <th className="text-right">Latency</th>
-                                <th>Started</th>
+                                <th className="text-right hidden xl:table-cell">Latency</th>
+                                <th className="hidden md:table-cell">Started</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -213,10 +213,10 @@ export default function EngineBacktest() {
                                             {r.status}
                                         </span>
                                     </td>
-                                    <td className="text-xs">{r.dataset_filename || "—"}</td>
+                                    <td className="text-xs hidden lg:table-cell">{r.dataset_filename || "—"}</td>
                                     <td className="text-right"><MetricValue type="count" value={r.rows_processed} /></td>
                                     <td className="text-right"><MetricValue type="count" value={r.n_approved} /></td>
-                                    <td className="text-right"><MetricValue type="currency" value={r.total_approved_dollars ?? null} /></td>
+                                    <td className="text-right hidden md:table-cell"><MetricValue type="currency" value={r.total_approved_dollars ?? null} /></td>
                                     <td className="text-right">
                                         {r.has_outcomes && r.auc !== undefined && r.auc !== null
                                             ? <span className={r.auc > 0.75 ? "text-up" : r.auc > 0.65 ? "text-warn" : "text-down"}>
@@ -224,12 +224,12 @@ export default function EngineBacktest() {
                                               </span>
                                             : <span className="text-muted-foreground">—</span>}
                                     </td>
-                                    <td className="text-right">
+                                    <td className="text-right hidden lg:table-cell">
                                         {r.has_outcomes && r.ks_statistic !== undefined && r.ks_statistic !== null
                                             ? r.ks_statistic.toFixed(3)
                                             : <span className="text-muted-foreground">—</span>}
                                     </td>
-                                    <td className="text-right">
+                                    <td className="text-right hidden lg:table-cell">
                                         {r.has_outcomes && r.brier_skill_score !== undefined && r.brier_skill_score !== null
                                             ? <span className={r.brier_skill_score > 0 ? "text-up" : "text-down"}>
                                                 {r.brier_skill_score.toFixed(3)}
@@ -243,8 +243,8 @@ export default function EngineBacktest() {
                                               </span>
                                             : <span className="text-muted-foreground">—</span>}
                                     </td>
-                                    <td className="text-right">{r.avg_latency_ms?.toFixed(1) ?? "—"} ms</td>
-                                    <td className="text-2xs text-muted-foreground">
+                                    <td className="text-right hidden xl:table-cell">{r.avg_latency_ms?.toFixed(1) ?? "—"} ms</td>
+                                    <td className="text-2xs text-muted-foreground hidden md:table-cell">
                                         {r.started_at ? new Date(r.started_at).toLocaleString() : "—"}
                                     </td>
                                 </tr>

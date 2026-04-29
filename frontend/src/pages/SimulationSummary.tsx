@@ -129,10 +129,11 @@ export default function SimulationSummary() {
                 </p>
             </div>
 
-            {/* Three-column layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* Column 1: Baseline (input file) */}
-                <div className="panel">
+            {/* Three-column layout — production-equivalent column is visually
+                 dominant (1.5x width on lg screens) since it's the actionable view */}
+            <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
+                {/* Column 1: Baseline (input file) — 2/7 cols on lg */}
+                <div className="panel lg:col-span-2">
                     <div className="panel-head">
                         <span className="panel-title">Baseline</span>
                         <span className="text-2xs text-muted-foreground">input file counterfactual</span>
@@ -149,8 +150,8 @@ export default function SimulationSummary() {
                     </div>
                 </div>
 
-                {/* Column 2: Score Distribution */}
-                <div className="panel">
+                {/* Column 2: Score Distribution — 2/7 cols on lg */}
+                <div className="panel lg:col-span-2">
                     <div className="panel-head">
                         <span className="panel-title">Score Distribution</span>
                         <span className="text-2xs text-muted-foreground">model view</span>
@@ -226,10 +227,16 @@ export default function SimulationSummary() {
                     </div>
                 </div>
 
-                {/* Column 3: Simulated Outcomes */}
-                <div className="panel">
+                {/* Column 3: Simulated Outcomes — 3/7 cols on lg, accented border
+                     to signal this is the actionable / production-equivalent view */}
+                <div className="panel lg:col-span-3 border-info/40 bg-info/[0.03]">
                     <div className="panel-head">
-                        <span className="panel-title text-info">Simulated Outcomes</span>
+                        <div>
+                            <span className="panel-title text-info">Simulated Outcomes</span>
+                            <span className="ml-2 text-2xs uppercase tracking-wider text-info/70 font-bold">
+                                Production-equivalent
+                            </span>
+                        </div>
                         <span className="text-2xs text-muted-foreground">cuts + ladder applied</span>
                     </div>
                     <div className="p-5 space-y-3 text-sm">
