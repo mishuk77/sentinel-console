@@ -89,6 +89,8 @@ class State:
     password: str
     include_mutations: bool = False
     preferred_system: Optional[str] = None  # name or id substring
+    build_csv_path: Optional[str] = None    # if set, run the build-system flow
+    max_train_wait_s: int = 1500            # 25 min default for 30k rows × 4 algos
     token: Optional[str] = None
     client_id: Optional[str] = None
     role: Optional[str] = None
@@ -133,9 +135,14 @@ def _record(state: State, finding: Finding) -> None:
     _emit(state, f"  {badge} {finding.step}: {finding.message}{detail_suffix}{duration}")
 
 
-def _ok(state: State, step: str, message: str, duration_s: Optional[float] = None) -> None:
+def _ok(state: State, step: str, message: str,
+         duration_s: Optional[float] = None,
+         expect_slow: bool = False) -> None:
+    """Emit a success line. Flags slow latency UNLESS expect_slow=True
+    (used for build/train steps that are inherently long-running and
+    shouldn't trigger gateway-timeout warnings)."""
     duration = f" {GREY}({duration_s:.2f}s){RESET}" if duration_s is not None else ""
-    if duration_s is not None and duration_s > LATENCY_WARN_SECONDS:
+    if duration_s is not None and duration_s > LATENCY_WARN_SECONDS and not expect_slow:
         _record(state, Finding(
             "P1", step,
             f"slow response - {duration_s:.1f}s (warn @ {LATENCY_WARN_SECONDS}s, fail @ {LATENCY_FAIL_SECONDS}s)",
@@ -257,6 +264,345 @@ def step_login(state: State) -> bool:
                                json.dumps(body)[:200], elapsed))
         return False
     _ok(state, "auth.login", f"signed in as {state.email} (role={state.role})", elapsed)
+    return True
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Build — end-to-end "create a new system from scratch" flow.
+# Activated by --build-system <path-to-csv>. Each step is highly mutating
+# and creates durable state on the target environment. Sequence:
+#
+#   create_system  -> POST /systems/
+#   upload_dataset -> POST /datasets/upload (multipart)
+#   annotate       -> PATCH /datasets/{id}/metadata
+#   train          -> POST /models/{dataset_id}/train + poll until complete
+#   activate_model -> POST /models/{id}/activate (best AUC candidate)
+#   publish_policy -> POST /policies/publish (decile 7 / 70% approval)
+#   create_segments -> POST /policies/{id}/segments × 2 (Existing/New)
+#   calibrate      -> POST /policies/{id}/segments/calibrate
+#   save_ladder    -> POST /policies/update-exposure
+#
+# After the build completes, state is populated and the rest of the walker
+# (verify, lifecycle) runs against the freshly-built system.
+# ════════════════════════════════════════════════════════════════════════════
+
+# Hardcoded for the loan_data_30k.csv schema. Adjust if a different file is
+# passed and the schema changes.
+LOAN_FEATURES = [
+    "fico", "annual_income", "dti", "loan_amount", "employment_length",
+    "loan_grade", "state", "customer_status", "tu_derogatory_marks",
+    "tu_revolving_utilization", "tu_inquiries_6mo",
+]
+LOAN_TARGET = "charge_off"
+LOAN_ID_COL = "applicant_id"
+LOAN_AMOUNT_COL = "loan_amount"
+LOAN_SEGMENT_DIMS = ["state", "customer_status"]
+
+
+def step_build_create_system(state: State) -> bool:
+    name = f"qa-walker-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    res = _call(state, "POST", "/systems/",
+                json_body={"name": name, "system_type": "full"},
+                step="build.create_system")
+    if res is None:
+        return False
+    body = res.json()
+    state.system_id = body["id"]
+    state.system = body
+    state.preferred_system = name
+    _ok(state, "build.create_system",
+        f"created '{name}' (id={state.system_id[:8]})")
+    return True
+
+
+def step_build_upload_dataset(state: State) -> bool:
+    csv_path = state.build_csv_path
+    if not csv_path:
+        _record(state, Finding("P0", "build.upload_dataset",
+                               "no --build-system path provided"))
+        return False
+    p = Path(csv_path)
+    if not p.exists():
+        _record(state, Finding("P0", "build.upload_dataset", f"file not found: {csv_path}"))
+        return False
+
+    started = time.perf_counter()
+    headers = {"Authorization": f"Bearer {state.token}"}
+    try:
+        with httpx.Client(base_url=state.base_url, headers=headers, timeout=180.0) as c:
+            with open(p, "rb") as f:
+                files = {"file": (p.name, f, "text/csv")}
+                data = {"system_id": state.system_id}
+                res = c.post("/datasets/upload", data=data, files=files)
+    except httpx.HTTPError as e:
+        _record(state, Finding("P0", "build.upload_dataset",
+                               f"upload failed: {type(e).__name__}", str(e)))
+        return False
+    elapsed = time.perf_counter() - started
+
+    if res.status_code not in (200, 201):
+        try:
+            detail = res.json().get("detail", res.text[:300])
+        except Exception:
+            detail = res.text[:300]
+        _record(state, Finding("P0", "build.upload_dataset",
+                               f"status {res.status_code}", str(detail), elapsed,
+                               status_code=res.status_code))
+        return False
+
+    body = res.json()
+    state.dataset_id = body.get("id") or body.get("dataset_id")
+    state.dataset = body
+    size_kb = p.stat().st_size // 1024
+    _ok(state, "build.upload_dataset",
+        f"uploaded {p.name} ({size_kb} KB, dataset_id={state.dataset_id[:8] if state.dataset_id else '?'})",
+        elapsed, expect_slow=True)
+    return state.dataset_id is not None
+
+
+def step_build_annotate_dataset(state: State) -> bool:
+    res = _call(
+        state, "PATCH", f"/datasets/{state.dataset_id}/metadata",
+        json_body={
+            "approved_amount_column": LOAN_AMOUNT_COL,
+            "id_column": LOAN_ID_COL,
+            "segmenting_dimensions": LOAN_SEGMENT_DIMS,
+        },
+        step="build.annotate_dataset",
+    )
+    if res is None:
+        return False
+    _ok(state, "build.annotate_dataset",
+        f"amount={LOAN_AMOUNT_COL}, id={LOAN_ID_COL}, segments={LOAN_SEGMENT_DIMS}")
+    return True
+
+
+def step_build_train(state: State) -> bool:
+    """Kick off training and poll until all models are out of TRAINING state."""
+    res = _call(
+        state, "POST", f"/models/{state.dataset_id}/train",
+        json_body={
+            "target_col": LOAN_TARGET,
+            "feature_cols": LOAN_FEATURES,
+            "model_context": "credit",
+        },
+        step="build.train.start",
+    )
+    if res is None:
+        return False
+    job_id = res.json().get("job_id") or state.dataset_id
+    _emit(state, f"  {GREY}-> training kicked off (job_id={job_id[:8]}); polling every 10s...{RESET}")
+
+    started = time.perf_counter()
+    deadline = started + state.max_train_wait_s
+    last_step_seen = ""
+    poll_iters = 0
+    while time.perf_counter() < deadline:
+        time.sleep(10)
+        poll_iters += 1
+        # Tail-of-events for progress display
+        try:
+            with _client(state, timeout=15.0) as c:
+                evt_res = c.get(f"/models/training-events/{job_id}")
+            if evt_res.status_code == 200:
+                events = evt_res.json()
+                if events:
+                    latest = events[-1] if isinstance(events, list) else events
+                    s_name = latest.get("step", "") if isinstance(latest, dict) else ""
+                    s_status = latest.get("status", "") if isinstance(latest, dict) else ""
+                    if s_name and s_name != last_step_seen:
+                        _emit(state, f"    {GREY}train: {s_name} - {s_status}{RESET}")
+                        last_step_seen = s_name
+        except Exception:
+            pass
+
+        # Check status of all models for this dataset
+        try:
+            with _client(state, timeout=15.0) as c:
+                m_res = c.get("/models/", params={"system_id": state.system_id})
+            if m_res.status_code != 200:
+                continue
+            models = [m for m in m_res.json() if m.get("dataset_id") == state.dataset_id]
+        except Exception:
+            continue
+
+        if not models:
+            continue
+        statuses = {m.get("status") for m in models}
+        still_training = any(s == "TRAINING" for s in statuses)
+        if not still_training:
+            elapsed = time.perf_counter() - started
+            ok_count = sum(1 for m in models if m.get("status") in ("CANDIDATE", "ACTIVE"))
+            failed_count = sum(1 for m in models if m.get("status") == "FAILED")
+            if ok_count == 0:
+                _record(state, Finding(
+                    "P0", "build.train",
+                    f"training finished but no CANDIDATE models (failed={failed_count})",
+                    duration_s=elapsed,
+                ))
+                return False
+            _ok(state, "build.train",
+                f"{ok_count} candidates, {failed_count} failed", elapsed,
+                expect_slow=True)
+            return True
+
+    elapsed = time.perf_counter() - started
+    _record(state, Finding(
+        "P0", "build.train",
+        f"training did not complete within {state.max_train_wait_s}s (polled {poll_iters} times)",
+        duration_s=elapsed,
+    ))
+    return False
+
+
+def step_build_activate_model(state: State) -> bool:
+    """Pick the best-AUC candidate and activate it."""
+    res = _call(state, "GET", "/models/",
+                params={"system_id": state.system_id},
+                step="build.activate.list")
+    if res is None:
+        return False
+    candidates = [m for m in res.json()
+                  if m.get("dataset_id") == state.dataset_id
+                  and m.get("status") == "CANDIDATE"]
+    if not candidates:
+        _record(state, Finding("P0", "build.activate",
+                               "no CANDIDATE models on the new dataset"))
+        return False
+    best = max(candidates, key=lambda m: (m.get("metrics") or {}).get("auc", 0))
+    state.model_id = best["id"]
+    state.model = best
+
+    res = _call(state, "POST", f"/models/{best['id']}/activate",
+                json_body={}, step="build.activate")
+    if res is None:
+        return False
+    _ok(state, "build.activate",
+        f"{best['algorithm']} (AUC {(best.get('metrics') or {}).get('auc', 0):.3f})")
+    return True
+
+
+def step_build_publish_policy(state: State) -> bool:
+    """Publish a global policy at decile 7 (70% approval target) using the
+    model's calibration to pick the actual score cutoff."""
+    cal = ((state.model or {}).get("metrics") or {}).get("calibration") or []
+    sorted_cal = sorted(cal, key=lambda b: b.get("decile", 0))
+    if len(sorted_cal) >= 7:
+        threshold = sorted_cal[6].get("max_score") or 0.5
+    else:
+        threshold = 0.5
+
+    res = _call(state, "POST", "/policies/publish",
+                json_body={
+                    "model_id": state.model_id,
+                    "decision_system_id": state.system_id,
+                    "threshold": float(threshold),
+                    "projected_approval_rate": 0.7,
+                    "projected_loss_rate": 0.1,
+                    "target_decile": 7,
+                },
+                timeout=45.0,
+                step="build.publish_policy")
+    if res is None:
+        return False
+    body = res.json()
+    state.policy_id = body["id"]
+    state.policy = body
+    _ok(state, "build.publish_policy",
+        f"published at threshold={threshold:.4f} (decile 7 / 70% approval target)")
+    return True
+
+
+def step_build_create_segments(state: State) -> bool:
+    """Create one segment per (state × customer_status) combination — same
+    pattern the user has been demoing."""
+    # We don't enumerate every state programmatically (would be ~50 segments);
+    # instead create a focused set that represents the feature.
+    states_to_seg = ["CA", "TX", "NY", "FL", "IL"]
+    customer_types = ["Existing", "New"]
+
+    created = 0
+    failed = 0
+    for s_val in states_to_seg:
+        for c_val in customer_types:
+            name = f"{s_val} - {c_val}"
+            res = _call(
+                state, "POST", f"/policies/{state.policy_id}/segments",
+                json_body={
+                    "name": name,
+                    "filters": {"state": s_val, "customer_status": c_val},
+                },
+                step=f"build.create_segment",
+                expected=(200, 201),
+                fail_severity="P1",
+            )
+            if res is None:
+                failed += 1
+            else:
+                created += 1
+    _ok(state, "build.create_segments",
+        f"{created} created, {failed} failed (on {state.policy_id[:8]})")
+    return created > 0
+
+
+def step_build_calibrate_segments(state: State) -> bool:
+    """Bulk calibrate the new segments. Uses target_bad_rate=0.15 so the
+    backend solves per-segment thresholds automatically."""
+    res = _call(
+        state, "POST", f"/policies/{state.policy_id}/segments/calibrate",
+        json_body={"target_bad_rate": 0.15},
+        timeout=120.0,
+        step="build.calibrate_segments",
+    )
+    if res is None:
+        return False
+    segments = res.json()
+    populated = sum(1 for s in segments if s.get("n_samples") is not None)
+    _ok(state, "build.calibrate_segments",
+        f"{populated}/{len(segments)} segments populated")
+    return populated > 0
+
+
+def step_build_save_ladder(state: State) -> bool:
+    """Build a monotone amount ladder driven by the model's calibration and
+    save it via /policies/update-exposure."""
+    cal = ((state.model or {}).get("metrics") or {}).get("calibration") or []
+    sorted_cal = sorted(cal, key=lambda b: b.get("decile", 0))
+
+    feature_stats = ((state.model or {}).get("metrics") or {}).get("feature_stats") or []
+    amt_stat = next((f for f in feature_stats if f.get("feature") == LOAN_AMOUNT_COL), None)
+    if amt_stat:
+        amt_min = float(amt_stat.get("min", 1000))
+        amt_max = float(amt_stat.get("max", 30000))
+    else:
+        amt_min, amt_max = 1000.0, 30000.0
+
+    n = max(len(sorted_cal), 1)
+    ladder: dict[str, int] = {}
+    prev_amt: Optional[int] = None
+    for i, bin_ in enumerate(sorted_cal):
+        ratio = i / max(n - 1, 1)
+        raw = amt_max - ratio * (amt_max - amt_min)
+        # round to nearest 100 and enforce strict monotone non-increasing
+        amt = max(int(amt_min), int(round(raw / 100.0) * 100))
+        if prev_amt is not None:
+            amt = min(amt, prev_amt)
+        ladder[str(int(bin_.get("decile", i + 1)))] = amt
+        prev_amt = amt
+
+    res = _call(
+        state, "POST", "/policies/update-exposure",
+        json_body={
+            "decision_system_id": state.system_id,
+            "amount_ladder": ladder,
+        },
+        step="build.save_ladder",
+    )
+    if res is None:
+        return False
+    _ok(state, "build.save_ladder",
+        f"ladder set for {len(ladder)} deciles "
+        f"(${ladder.get('1', 0):,} -> ${ladder.get(str(n), 0):,})")
     return True
 
 
@@ -1764,7 +2110,18 @@ ALL_STEPS: list[tuple[str, Callable[[State], bool], bool, str]] = [
     ("health",                    step_health,                    True,  "auth"),
     ("login",                     step_login,                     True,  "auth"),
 
-    # Systems
+    # Build (only runs when --build-system is passed; idempotent skip otherwise)
+    ("build.create_system",       step_build_create_system,       True,  "build"),
+    ("build.upload_dataset",      step_build_upload_dataset,      True,  "build"),
+    ("build.annotate_dataset",    step_build_annotate_dataset,    False, "build"),
+    ("build.train",               step_build_train,               True,  "build"),
+    ("build.activate_model",      step_build_activate_model,      True,  "build"),
+    ("build.publish_policy",      step_build_publish_policy,      True,  "build"),
+    ("build.create_segments",     step_build_create_segments,     False, "build"),
+    ("build.calibrate_segments",  step_build_calibrate_segments,  False, "build"),
+    ("build.save_ladder",         step_build_save_ladder,         False, "build"),
+
+    # Systems (skipped in build mode — already populated above)
     ("systems.list",              step_systems_list,              True,  "systems"),
     ("systems.get",                step_systems_get,               False, "systems"),
 
@@ -1919,6 +2276,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--system", default=os.environ.get("SENTINEL_SYSTEM"),
                    help="Pick a system by name or id substring (deterministic). "
                         "Default: alphabetically first system with an active model.")
+    p.add_argument("--build-system", default=os.environ.get("SENTINEL_BUILD_CSV"),
+                   metavar="CSV_PATH",
+                   help="Build a fresh decision system end-to-end from the given "
+                        "CSV file. Implies --include-mutations. Trains models, "
+                        "publishes a policy, configures segments, and saves an "
+                        "exposure ladder. Existing list/pick steps are skipped.")
+    p.add_argument("--max-train-wait", type=int, default=1500,
+                   help="Max seconds to wait for training to finish (build mode "
+                        "only). Default 1500 (25 min).")
     p.add_argument("--list-steps", action="store_true",
                    help="Print step inventory grouped by module and exit")
     return p.parse_args()
@@ -1943,12 +2309,16 @@ def main() -> int:
               f"Set SENTINEL_PASSWORD or pass --password.", file=sys.stderr)
         return 2
 
+    # --build-system implies mutations.
+    include_mutations = args.include_mutations or bool(args.build_system)
     state = State(
         base_url=args.base_url.rstrip("/"),
         email=args.email,
         password=args.password,
-        include_mutations=args.include_mutations,
+        include_mutations=include_mutations,
         preferred_system=args.system,
+        build_csv_path=args.build_system,
+        max_train_wait_s=args.max_train_wait,
     )
 
     selected_modules: Optional[set[str]] = None
@@ -1967,9 +2337,26 @@ def main() -> int:
         _emit(state, f"{GREY}modules: {', '.join(sorted(selected_modules))}{RESET}")
     _emit(state, "")
 
+    # Build mode reshuffles flow: when --build-system is set the build module
+    # creates the entities, and the existing list/pick steps are skipped
+    # because state.{system,dataset,model,policy}_id are already populated.
+    BUILD_REPLACES = {
+        "systems.list", "systems.get",
+        "datasets.list", "datasets.preview",
+        "datasets.segment_columns", "datasets.profile",
+        "models.list",
+        # policies.list still runs but the pick is a no-op since state.policy is set
+    }
+
     last_module: Optional[str] = None
     for label, fn, halt, module in ALL_STEPS:
         if selected_modules and module not in selected_modules:
+            continue
+        # Skip the build module unless --build-system was requested.
+        if module == "build" and not state.build_csv_path:
+            continue
+        # In build mode, skip the legacy list/pick steps — entities already exist.
+        if state.build_csv_path and label in BUILD_REPLACES:
             continue
         if module != last_module:
             _emit(state, f"{CYAN}{BOLD}== {module} =={RESET}")
