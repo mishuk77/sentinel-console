@@ -88,6 +88,7 @@ class State:
     email: str
     password: str
     include_mutations: bool = False
+    preferred_system: Optional[str] = None  # name or id substring
     token: Optional[str] = None
     client_id: Optional[str] = None
     role: Optional[str] = None
@@ -271,12 +272,33 @@ def step_systems_list(state: State) -> bool:
         _record(state, Finding("P0", "systems.list",
                                "no decision systems on this account"))
         return False
-    with_active = [s for s in systems if s.get("active_model_id")]
-    chosen = with_active[0] if with_active else systems[0]
+
+    # Deterministic pick: name match takes precedence; otherwise sort by name
+    # alphabetically and take the first one with an active model. Falls back
+    # to the first system if none have an active model.
+    chosen = None
+    if state.preferred_system:
+        needle = state.preferred_system.lower()
+        for s in systems:
+            if needle in (s.get("name") or "").lower() or needle in s.get("id", "").lower():
+                chosen = s
+                break
+        if chosen is None:
+            _record(state, Finding(
+                "P1", "systems.list",
+                f"requested system '{state.preferred_system}' not found - falling back",
+            ))
+
+    if chosen is None:
+        sorted_systems = sorted(systems, key=lambda s: (s.get("name") or "").lower())
+        with_active = [s for s in sorted_systems if s.get("active_model_id")]
+        chosen = with_active[0] if with_active else sorted_systems[0]
+
     state.system_id = chosen["id"]
     state.system = chosen
     _ok(state, "systems.list",
-        f"{len(systems)} system(s); picked {chosen.get('name', '?')[:40]}")
+        f"{len(systems)} system(s); picked '{chosen.get('name', '?')[:40]}' "
+        f"(id={chosen['id'][:8]})")
     return True
 
 
@@ -1894,6 +1916,9 @@ def parse_args() -> argparse.Namespace:
                    help="Run a comma-separated list of modules")
     p.add_argument("--include-mutations", action="store_true",
                    help="Include mutating endpoints (publish, calibrate, make decision, etc.)")
+    p.add_argument("--system", default=os.environ.get("SENTINEL_SYSTEM"),
+                   help="Pick a system by name or id substring (deterministic). "
+                        "Default: alphabetically first system with an active model.")
     p.add_argument("--list-steps", action="store_true",
                    help="Print step inventory grouped by module and exit")
     return p.parse_args()
@@ -1923,6 +1948,7 @@ def main() -> int:
         email=args.email,
         password=args.password,
         include_mutations=args.include_mutations,
+        preferred_system=args.system,
     )
 
     selected_modules: Optional[set[str]] = None
