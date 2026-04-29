@@ -256,7 +256,7 @@ function SegmentBreakoutPanel({ data }: {
                     Production-equivalent metrics by {data.dimension}
                 </p>
                 <p className="text-2xs text-muted-foreground">
-                    Σ segment metrics = portfolio total (TASK-11B reconciliation rule)
+                    Σ segment metrics = portfolio total (reconciliation invariant)
                 </p>
             </div>
             <table className="dt text-xs">

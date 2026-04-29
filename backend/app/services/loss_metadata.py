@@ -81,22 +81,20 @@ class LossHandlingResolution:
 
     def ui_footnote(self) -> str:
         """Human-readable footnote that appears in the UI wherever dollar
-        metrics are displayed. Required by TASK-6 acceptance criteria."""
+        metrics are displayed. Plain language — no internal mode numbers."""
         if self.mode == "mode_1":
             return (
-                f"Dollar metrics computed using {self.loss_amount_column!r} "
-                f"(actual loss amount, Mode 1)."
+                f"Dollar metrics use the {self.loss_amount_column!r} column "
+                f"(actual loss amount per defaulted application)."
             )
         if self.mode == "mode_2":
             return (
-                f"Dollar metrics computed as "
-                f"{self.approved_amount_column!r} × {self.target_column!r} "
-                f"(full principal at risk, Mode 2)."
+                f"Loss = {self.approved_amount_column!r} × predicted probability "
+                f"(full principal at risk on default)."
             )
         return (
-            "Dollar metrics unavailable — no loss amount or approved amount "
-            "column tagged on this dataset (Mode 3). Annotate the dataset "
-            "to enable dollar-based reporting."
+            "Dollar metrics unavailable — tag an approved-amount or loss-amount "
+            "column on this dataset to enable dollar-based reporting."
         )
 
 

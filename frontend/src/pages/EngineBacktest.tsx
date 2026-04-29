@@ -345,7 +345,7 @@ function RunDetail({ run, onClose }: { run: BacktestSummary; onClose: () => void
                 ) : (
                     <div className="p-6 text-sm text-muted-foreground">
                         No outcome label detected in this dataset. Tag a target column on the
-                        dataset (TASK-6 metadata) or upload a richer dataset to enable
+                        dataset metadata, or upload a richer dataset to enable
                         calibration analysis.
                     </div>
                 )}

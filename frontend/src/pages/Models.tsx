@@ -331,7 +331,7 @@ export default function Models() {
                                             <HealthStatusBadge
                                                 status={m.health_status}
                                                 size="xs"
-                                                layerLabel="Layer 1 (training-time)"
+                                                layerLabel="Training-time check"
                                             />
                                         </td>
                                         <td>

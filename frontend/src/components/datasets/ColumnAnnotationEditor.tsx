@@ -105,43 +105,42 @@ export function ColumnAnnotationEditor({ dataset, open, onClose }: ColumnAnnotat
                         backtests, and unlock segment breakouts on comparison tables.
                     </p>
 
-                    {/* Mode explainer — discoverable docs for new users */}
+                    {/* How dollar metrics are computed — discoverable docs for new users */}
                     <details className="text-xs border border-border rounded p-3 bg-muted/10">
                         <summary className="cursor-pointer text-foreground font-medium select-none">
-                            How dollar metrics are computed (Mode 1 / 2 / 3)
+                            How dollar metrics are computed
                         </summary>
                         <div className="mt-3 space-y-2.5 text-muted-foreground">
                             <div className="flex gap-2.5">
-                                <span className="badge badge-blue text-2xs shrink-0 mt-0.5">Mode 1</span>
+                                <span className="badge badge-blue text-2xs shrink-0 mt-0.5">Loss-tracked</span>
                                 <p>
-                                    <strong className="text-foreground">Loss amount column set</strong> —
+                                    <strong className="text-foreground">A loss-amount column is tagged</strong> —
                                     we use the actual dollar amount lost per defaulted application
                                     (e.g. <span className="font-mono">charge_off_amount</span>).
-                                    Most accurate. Required for sub-principal recovery scenarios.
+                                    Most accurate; required for sub-principal recovery scenarios.
                                 </p>
                             </div>
                             <div className="flex gap-2.5">
-                                <span className="badge badge-green text-2xs shrink-0 mt-0.5">Mode 2</span>
+                                <span className="badge badge-green text-2xs shrink-0 mt-0.5">Principal-at-risk</span>
                                 <p>
-                                    <strong className="text-foreground">Approved-amount column set</strong>,
-                                    no loss column — we assume full principal at risk on default
+                                    <strong className="text-foreground">An approved-amount column is tagged</strong>
+                                    {" "}(no loss column) — we assume full principal at risk on default
                                     (the standard credit assumption when LGD data isn't available).
                                     Loss = approved_amount × predicted_probability.
                                 </p>
                             </div>
                             <div className="flex gap-2.5">
-                                <span className="badge badge-muted text-2xs shrink-0 mt-0.5">Mode 3</span>
+                                <span className="badge badge-muted text-2xs shrink-0 mt-0.5">Counts only</span>
                                 <p>
-                                    <strong className="text-foreground">Neither set</strong> —
+                                    <strong className="text-foreground">Neither column is tagged</strong> —
                                     we can only compute count metrics (number of approvals,
                                     expected number of defaulters). Dollar columns show "—" until
                                     you tag at least an approved-amount column.
                                 </p>
                             </div>
                             <p className="text-2xs italic pt-1 border-t border-border/50">
-                                Mode is determined per (model, dataset) pair. The active mode is
-                                always shown as a footnote beneath every dollar-bearing table,
-                                and on the Datasets list as a Mode 1/2/3 badge per row.
+                                The active method is always shown as a footnote beneath every
+                                dollar-bearing table, and as a badge in the Datasets list.
                             </p>
                         </div>
                     </details>
@@ -150,13 +149,13 @@ export function ColumnAnnotationEditor({ dataset, open, onClose }: ColumnAnnotat
                     <Field
                         icon={<DollarSign className="h-4 w-4 text-info" />}
                         label="Approved amount column"
-                        helper="Principal/loan amount per row. Required for Mode 2 dollar metrics. Predicted loss = approved_amount × probability."
+                        helper="Principal/loan amount per row. Required to enable dollar metrics. Predicted loss = approved_amount × probability."
                     >
                         <ColumnSelect
                             value={approvedCol}
                             onChange={setApprovedCol}
                             columns={columns}
-                            placeholder="None — Mode 3 (count metrics only)"
+                            placeholder="None — count metrics only"
                         />
                     </Field>
 
@@ -164,13 +163,13 @@ export function ColumnAnnotationEditor({ dataset, open, onClose }: ColumnAnnotat
                     <Field
                         icon={<DollarSign className="h-4 w-4 text-down" />}
                         label="Loss amount column"
-                        helper="Actual dollar amount lost when the bad event occurred. When set, takes precedence over the Mode 2 full-principal-at-risk assumption."
+                        helper="Actual dollar amount lost when the bad event occurred. When set, this is used directly instead of the principal-at-risk assumption."
                     >
                         <ColumnSelect
                             value={lossCol}
                             onChange={setLossCol}
                             columns={columns}
-                            placeholder="None — fall back to Mode 2 (or 3)"
+                            placeholder="None — use principal-at-risk assumption"
                         />
                     </Field>
 
@@ -192,7 +191,7 @@ export function ColumnAnnotationEditor({ dataset, open, onClose }: ColumnAnnotat
                     <Field
                         icon={<Layers className="h-4 w-4 text-info" />}
                         label="Segmenting dimensions"
-                        helper="Columns available as breakout dimensions on every aggregate view (TASK-11F). Tag categorical columns like channel, product, or region."
+                        helper="Tag categorical columns like channel, product, or region. Once tagged, they become available as breakout dimensions on every aggregate view."
                     >
                         <div className="flex flex-wrap gap-1.5">
                             {columns.length === 0 && (
@@ -234,7 +233,7 @@ export function ColumnAnnotationEditor({ dataset, open, onClose }: ColumnAnnotat
                     <p className="text-xs text-muted-foreground">
                         {savedAt
                             ? <>Saved {savedAt.toLocaleTimeString()}</>
-                            : <>Mode {resolveMode(approvedCol, lossCol)} dollar metrics</>}
+                            : <>Currently: <span className="text-foreground font-medium">{resolveMode(approvedCol, lossCol)}</span></>}
                     </p>
                     <div className="flex items-center gap-2">
                         <button
@@ -264,9 +263,9 @@ export function ColumnAnnotationEditor({ dataset, open, onClose }: ColumnAnnotat
 // ────────────────────────────────────────────────────────────────────────
 
 function resolveMode(approved: string, loss: string): string {
-    if (loss) return "1 — explicit loss column";
-    if (approved) return "2 — full principal at risk";
-    return "3 — count metrics only";
+    if (loss) return "Loss-tracked (using explicit loss column)";
+    if (approved) return "Principal-at-risk (full approved amount on default)";
+    return "Counts only (no dollar metrics)";
 }
 
 function Field({ icon, label, helper, children }: {

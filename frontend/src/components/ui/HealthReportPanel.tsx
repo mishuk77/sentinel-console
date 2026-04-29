@@ -85,12 +85,13 @@ export function HealthReportPanel({ report, title = "Model Health Guardrails", c
             </table>
             <div className="px-4 py-3 border-t bg-muted/10 text-2xs text-muted-foreground">
                 <p>
-                    <strong>How this works.</strong> Layer 1 runs after model
-                    fit (FAIL blocks the artifact from being saved). Layer 2
-                    runs at policy publish (FAIL blocks activation). Layer 3
-                    runs every 5 minutes against the rolling window of
-                    production predictions (FAIL flags the system as
-                    degraded).
+                    <strong>How this works.</strong> The training-time check runs
+                    immediately after model fit — a FAIL prevents the artifact
+                    from being saved. The registration check runs at policy
+                    publish; a FAIL blocks activation. The production monitor
+                    runs every 5 minutes against the rolling window of recent
+                    decisions and flags the system as degraded if drift exceeds
+                    threshold.
                 </p>
             </div>
         </div>

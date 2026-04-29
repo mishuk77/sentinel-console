@@ -44,7 +44,7 @@ export default function SystemOverview() {
                         <HealthStatusBadge
                             status={(system as any)?.runtime_health_status}
                             size="sm"
-                            layerLabel="Layer 3 (runtime monitor)"
+                            layerLabel="Production monitor"
                         />
                     </h2>
                     <p className="page-desc">{system.description || "No description provided."}</p>

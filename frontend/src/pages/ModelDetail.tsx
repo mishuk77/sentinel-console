@@ -126,7 +126,7 @@ export default function ModelDetail() {
                         <HealthStatusBadge
                             status={model.health_status}
                             size="sm"
-                            layerLabel="Layer 1 (training-time)"
+                            layerLabel="Training-time health check"
                         />
                     </h1>
                     <p className="text-xs text-muted-foreground mt-1 font-mono">

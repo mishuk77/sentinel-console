@@ -250,7 +250,7 @@ export default function Datasets() {
                                 <th>Rows</th>
                                 <th>Status</th>
                                 <th>Uploaded At</th>
-                                <th>Loss mode</th>
+                                <th>Dollar metrics</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -285,18 +285,27 @@ export default function Datasets() {
                                         {new Date(ds.created_at).toLocaleDateString()} <span className="mx-1 text-muted-foreground/30">|</span> {new Date(ds.created_at).toLocaleTimeString()}
                                     </td>
                                     <td>
-                                        {/* TASK-6: surface the active loss-mode badge */}
+                                        {/* Surface how dollar metrics are computed for this dataset */}
                                         {ds.loss_amount_column ? (
-                                            <span className="badge badge-blue text-xs" title={`Loss column: ${ds.loss_amount_column}`}>
-                                                Mode 1
+                                            <span
+                                                className="badge badge-blue text-xs"
+                                                title={`Dollar loss = ${ds.loss_amount_column} (actual loss column). Most accurate.`}
+                                            >
+                                                Loss-tracked
                                             </span>
                                         ) : ds.approved_amount_column ? (
-                                            <span className="badge badge-green text-xs" title={`Amount column: ${ds.approved_amount_column}`}>
-                                                Mode 2
+                                            <span
+                                                className="badge badge-green text-xs"
+                                                title={`Dollar loss = ${ds.approved_amount_column} × predicted probability (full principal at risk).`}
+                                            >
+                                                Principal-at-risk
                                             </span>
                                         ) : (
-                                            <span className="badge badge-muted text-xs" title="No dollar metrics — click the tag icon to annotate">
-                                                Mode 3
+                                            <span
+                                                className="badge badge-muted text-xs"
+                                                title="No dollar metrics yet. Click the tag icon to annotate the approved-amount column."
+                                            >
+                                                Counts only
                                             </span>
                                         )}
                                     </td>
@@ -305,7 +314,7 @@ export default function Datasets() {
                                             <button
                                                 onClick={() => setEditingDataset(ds)}
                                                 className="text-muted-foreground hover:text-info transition-colors p-2 rounded-full hover:bg-info/10"
-                                                title="Tag columns (TASK-6)"
+                                                title="Tag columns to enable dollar metrics and segment breakouts"
                                             >
                                                 <Tag className="h-4 w-4" />
                                             </button>

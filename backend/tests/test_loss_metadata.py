@@ -124,7 +124,8 @@ def test_ui_footnote_mode_1_describes_loss_column():
         _FakeDataset(approved_amount_column="loan_amount"),
     )
     footnote = res.ui_footnote()
-    assert "Mode 1" in footnote
+    # Plain-language: must reference the loss column and explain
+    # what it represents — no internal "Mode N" jargon
     assert "charge_off_amount" in footnote
     assert "actual loss amount" in footnote
 
@@ -135,18 +136,17 @@ def test_ui_footnote_mode_2_describes_full_principal():
         _FakeDataset(approved_amount_column="loan_amount"),
     )
     footnote = res.ui_footnote()
-    assert "Mode 2" in footnote
+    # Must show the formula in plain language
     assert "loan_amount" in footnote
-    assert "charge_off" in footnote
+    assert "predicted probability" in footnote
     assert "full principal at risk" in footnote
 
 
 def test_ui_footnote_mode_3_explains_unavailable():
     res = resolve_loss_handling(_FakeModel(), _FakeDataset())
     footnote = res.ui_footnote()
-    assert "Mode 3" in footnote
     assert "unavailable" in footnote
-    assert "Annotate the dataset" in footnote
+    assert "tag" in footnote.lower()
 
 
 # ────────────────────────────────────────────────────────────────────────
