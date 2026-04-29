@@ -1,11 +1,16 @@
-# Sentinel QA — Demo Path Walker
+# Sentinel QA — Comprehensive Demo Path Walker
 
-A Python script that walks the full demo flow against a deployed Sentinel
-backend, asserts on each step, and writes a markdown report of failures.
+Walks every functional area of the platform via the same HTTP contract the
+frontend uses, asserts on each step, and writes a markdown report grouped by
+severity. ~40+ endpoints across all modules.
 
-The walker hits the same HTTP endpoints the frontend uses, so any backend
-breakage on the demo path surfaces here before the demo audience sees it.
-What it does **not** catch: pure UI bugs (cache invalidation, stale state,
+What this catches: backend regressions, missing data, broken state
+transitions, gateway-timeout-prone routes, response-shape changes the
+frontend depends on, the architectural invariants we've already had to fix
+once (segment persistence across policy edits, save round-trip
+verification, etc.).
+
+What this does **not** catch: pure UI bugs (cache invalidation, stale state,
 broken empty-state) — those need a browser harness.
 
 ## Setup
@@ -13,98 +18,128 @@ broken empty-state) — those need a browser harness.
 ```bash
 cd sentinel-qa
 python -m venv .venv
-.venv/Scripts/activate     # Windows
-# source .venv/bin/activate  # Linux/Mac
+.venv/Scripts/activate         # Windows
+# source .venv/bin/activate    # macOS/Linux
 pip install -r requirements.txt
 ```
 
-## Run against Railway (production)
+## Run
+
+### Read-only sweep (safe — no mutations)
 
 ```bash
-SENTINEL_API_URL=https://your-railway-backend.up.railway.app/api/v1 \
-SENTINEL_EMAIL=mishuk77@gmail.com \
+SENTINEL_API_URL=https://your-railway.up.railway.app/api/v1 \
 SENTINEL_PASSWORD='...' \
 python walker.py
 ```
 
-Or pass flags directly:
+### Full sweep including mutating endpoints
+
+Use this to verify the full demo flow, including publishing a policy,
+calibrating segments, and making a decision. Will **alter durable state**
+on the target environment (creates a new published policy revision,
+calibrates segments, creates a decision record).
 
 ```bash
-python walker.py \
-    --base-url https://your-railway-backend.up.railway.app/api/v1 \
-    --password '...'
+python walker.py --include-mutations
 ```
 
-## Run against local dev
+### Single module
 
 ```bash
-# In one terminal: backend
-cd ../backend && uvicorn app.main:app --reload
-
-# In another terminal:
-cd sentinel-qa
-SENTINEL_PASSWORD='...' python walker.py
+python walker.py --module fraud
+python walker.py --module policies --include-mutations
+python walker.py --modules systems,datasets,models
 ```
 
-Defaults to `http://localhost:8000/api/v1`.
+### Inventory
 
-## Output
+```bash
+python walker.py --list-steps
+```
 
-- **stdout** — color-coded pass/fail summary, one line per step
-- **issues.md** — markdown report grouped by severity (regenerated each run)
-- **walker.log** — full log of every line emitted (useful for grepping)
+## Coverage by module
 
-The script exits with status `1` if any P0 findings were recorded, `0` otherwise.
-
-## What gets exercised
-
-The walker assumes you already have a system + dataset + model in the database
-(creating those is slow and not idempotent). Each run:
-
-1. **health** — API reachability smoke test
-2. **login** — OAuth2 password flow, captures access token
-3. **pick system** — chooses an existing decision system (prefers one with an active model)
-4. **get system detail** — verifies response shape used by the frontend
-5. **pick dataset** — checks dataset annotations (approved_amount_column, segmenting_dimensions)
-6. **list models** — picks the active or highest-AUC candidate; flags missing artifact_path
-7. **publish policy** — `POST /policies/publish` with full round-trip verification
-   (re-fetches `/systems/{id}` and asserts persisted threshold matches)
-8. **list segments** — counts segments on the active policy
-9. **calibrate segments** — runs the bulk calibrate route; flags if `n_samples` aren't populated after
-10. **segmentation impact** — fetches the 3-stage impact comparison and runs sanity checks
-    (baseline approval = 100%, segmented stage uses same population as global)
-11. **simulate portfolio** — exercises the simulation endpoint that backs ImpactTable
-12. **make decision** — single decision through the production engine
-13. **backtest runs list** — checks the backtest history endpoint
-
-Every step is timed. Latency over **15s** flags P1 (slow), over **28s** flags P0
-(near Railway's gateway timeout).
+| Module | Steps | What's exercised |
+|---|---|---|
+| **auth** | health, login | API reachability, OAuth2 password flow |
+| **systems** | list, get | Decision-system list, response-shape required by frontend (active_policy_summary etc.) |
+| **datasets** | list, preview, profile, segment-columns | Dataset listing + preview; flags missing annotations |
+| **models** | list, get, risk-amount-matrix, documentation | Risk model selection, feature_stats, calibration data, docx export |
+| **policies** | list, publish, recommend-amounts | Policy listing (asserts singleton-active invariant), atomic publish + round-trip threshold verification |
+| **segments** | list, calibrate, calibration, impact | Segment CRUD readback, bulk calibrate, per-segment calibration, 3-stage impact panel sanity checks |
+| **simulation** | portfolio, breakout, diff | The endpoints backing ImpactTable / ExposureControl / PolicyDiff |
+| **decisions** | list, stats, make, get | Decision history, overview stats, single decision through prod engine, audit lookup |
+| **backtest** | list, get, rows | Backtest history; flags inaccessible runs |
+| **dashboard** | stats, volume, deployment, daily | Top-level dashboard tiles |
+| **fraud** | settings, tiers, models, models.features, rules, rules.fields, cases, signals.providers, analytics × 5 | Full fraud module sweep (read-only) |
+| **lifecycle** | segment_persistence | Composite invariant: segments survive policy republishing |
 
 ## Severity levels
 
-- **P0** — demo-blocking. Halt the walker on a P0 in a required step.
-- **P1** — likely to surface during demo. Visible silently-degraded experience.
-- **P2** — edge case / configuration issue.
-- **INFO** — observation, not a failure (e.g. "no segments configured yet").
+- **P0** — demo-blocking. Walker exits with status 1.
+- **P1** — likely to surface during demo (slow latency, missing fields, etc.).
+- **P2** — edge case / configuration.
+- **INFO** — observation, not a failure (e.g. "no fraud module configured").
+
+## Latency budget
+
+Every HTTP call is timed. A successful response that takes:
+- < 15s — passes silently
+- 15–28s — flagged P1 (slow)
+- > 28s — flagged P0 (close to Railway's gateway timeout window)
+
+This catches "works fine on dev, times out on Railway with a real dataset"
+*before* the demo audience sees Network Error.
+
+## What this asserts that's worth knowing
+
+1. **Single source of truth on threshold** — `policies.publish` posts a
+   threshold, then re-fetches `/systems/{id}` and asserts the persisted
+   threshold matches within `1e-6`. Catches the silent-failure mode where
+   activate succeeded but the active pointer didn't update.
+2. **Singleton active policy** — `policies.list` flags if more than one
+   policy has `is_active=True` for the same system.
+3. **Segment persistence across publishes** — `lifecycle.segment_persistence`
+   re-publishes the policy at the same threshold and asserts the segment
+   count is unchanged. Catches the "segments disappear after global edit"
+   regression we already had to fix once.
+4. **Reconciliation on the impact panel** — `segments.impact` asserts the
+   three stages all use the same population size (`n_total`) and that
+   baseline approval = 100%.
+5. **Population shape on simulation** — `simulate.portfolio` checks the
+   meta block exists for audit traceability.
+
+## Outputs
+
+- `stdout` — color-coded module-grouped pass/fail, one line per step
+- `issues.md` — markdown report grouped by severity (regenerated each run)
+- `walker.log` — verbose execution log
+
+Exit code: `1` if any P0 finding, `0` otherwise. Useful in CI.
+
+## Mutating vs read-only endpoints
+
+Mutating steps are gated behind `--include-mutations`. They are:
+
+- `policies.publish` — creates a new published policy revision
+- `segments.calibrate` — runs Phase 1 sample-counting + Phase 2 scoring
+- `decisions.make` — writes a single decision record
+- `lifecycle.segment_persistence` — runs an extra publish to verify the
+  invariant
+
+**Destructive** endpoints (delete model, delete dataset, delete policy,
+delete fraud rule) are NEVER exercised by the walker. Test those manually
+when you intend to delete something.
 
 ## Adding a step
 
-1. Add a `step_*` function in `walker.py` that takes `state: State` and returns `bool`
-2. Use `_call(state, "GET"|"POST"|..., path, step="...")` for HTTP — handles timing,
-   error capture, and the gateway-timeout warning automatically
-3. Use `_record(state, Finding(severity, step, message, detail))` for assertions
-4. Use `_ok(state, step, message, duration)` for successful step completion
-5. Append to the `DEMO_STEPS` list with `(label, fn, halt_on_failure)`
+Edit `walker.py`:
 
-## What this does NOT cover
-
-- Frontend cache invalidation bugs ("save succeeded but UI shows old value")
-- Component-state regressions ("slider rehydrates to wrong position on reload")
-- CSS / layout / accessibility
-- Cross-browser compatibility
-- The full training pipeline (slow; assumes models pre-exist)
-- Dataset upload (slow; assumes datasets pre-exist)
-
-For those, run the demo flow manually in a browser at least once before the
-demo. Use the build-indicator timestamp in the top nav to confirm you're
-testing the latest deploy.
+1. Add a `step_*(state: State) -> bool` function. Use:
+   - `_call(state, method, path, ...)` for HTTP — handles timing + error capture
+   - `_record(state, Finding(severity, step, message, detail))` for findings
+   - `_ok(state, step, message, duration)` for success
+   - `_info(state, step, message)` for non-failure observations
+2. Append to `ALL_STEPS` with `(label, fn, halt_on_failure, module_name)`
+3. Test with `python walker.py --module <module_name>`
