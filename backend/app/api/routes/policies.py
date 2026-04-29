@@ -360,14 +360,6 @@ def activate_policy(
                 model.distribution_baseline = validation["distribution_baseline"]
                 flag_modified(model, "distribution_baseline")
         
-    # Find the currently active policy (before deactivating) to migrate segments
-    from app.models.policy_segment import PolicySegment
-    previously_active = db.query(Policy).filter(
-        Policy.decision_system_id == target_policy.decision_system_id,
-        Policy.is_active == True,
-        Policy.id != target_policy.id
-    ).first() if target_policy.decision_system_id else None
-
     # Deactivate ALL policies globally (Singleton Active Policy)
     # NOW SCOPED TO SYSTEM
     if target_policy.decision_system_id:
@@ -376,11 +368,30 @@ def activate_policy(
         # Fallback for old data?
         db.query(Policy).update({"is_active": False})
 
-    # Migrate segments from the previously active policy to this one
-    if previously_active:
-        db.query(PolicySegment).filter(
-            PolicySegment.policy_id == previously_active.id
-        ).update({"policy_id": target_policy.id})
+    # Migrate segments to the target policy. Each global-policy edit creates a
+    # fresh Policy row, so without this step every threshold change empties the
+    # Segmentation tab. We move ALL segments owned by sibling policies of this
+    # decision system onto the new active policy — robust to edge cases where
+    # the previously-active flag was already cleared, where segments were
+    # orphaned on an older archived policy, or where multiple sibling policies
+    # carry partial segment state. Audit history of the previous policy state
+    # is preserved via Policy.published_snapshot.
+    from app.models.policy_segment import PolicySegment
+    if target_policy.decision_system_id:
+        sibling_ids = [
+            row[0] for row in db.query(Policy.id).filter(
+                Policy.decision_system_id == target_policy.decision_system_id,
+                Policy.id != target_policy.id,
+            ).all()
+        ]
+        if sibling_ids:
+            moved = db.query(PolicySegment).filter(
+                PolicySegment.policy_id.in_(sibling_ids)
+            ).update({"policy_id": target_policy.id}, synchronize_session=False)
+            logger.info(
+                "Activate %s: migrated %d segment(s) from %d sibling policies",
+                target_policy.id, moved, len(sibling_ids),
+            )
 
     # Activate target
     target_policy.is_active = True
