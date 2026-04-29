@@ -299,22 +299,54 @@ def activate_policy(
             # serialization in dev is acceptable; production is Postgres.
             pass
 
-    # TASK-10 Layer 2 — registration health check
+    # ── Registration health check ──────────────────────────────────
+    # Only "catastrophic" failures block activation — those that
+    # indicate the model is mathematically broken or the inference
+    # pipeline is misconfigured. Calibration miscalibration alone is
+    # NOT blocking: in finance, imbalanced targets routinely produce
+    # high calibration error even after post-hoc remapping. The user
+    # sees the warning and can decide; the system doesn't refuse.
+    #
+    # Catastrophic (block):  saturation, mode_collapse, out_of_range,
+    #                        nan_inf, distribution_drift (parity issue)
+    # Diagnostic (warn):     calibration
     if not skip_health_checks:
         model = db.query(MLModel).filter(MLModel.id == target_policy.model_id).first()
         if model:
             validation = _run_layer_2_validation(db, model)
-            if validation["status"] == "FAIL":
+            CATASTROPHIC_CHECKS = {
+                "saturation", "mode_collapse",
+                "out_of_range", "nan_inf",
+                "distribution_drift",
+            }
+            blocking_failures = [
+                f for f in validation.get("failures", [])
+                if f["check"] in CATASTROPHIC_CHECKS
+            ]
+            non_blocking_failures = [
+                f for f in validation.get("failures", [])
+                if f["check"] not in CATASTROPHIC_CHECKS
+            ]
+            if blocking_failures:
                 failure_msgs = "; ".join(
-                    f"{f['check']}: {f['message']}" for f in validation.get("failures", [])
+                    f"{f['check']}: {f['message']}" for f in blocking_failures
                 )
                 raise HTTPException(
                     status_code=422,
                     detail=(
-                        f"Cannot activate policy — model failed registration health checks. "
-                        f"{failure_msgs} Re-train the model or pass "
-                        f"?skip_health_checks=true to override (audit-logged)."
+                        f"Cannot activate policy — model failed catastrophic "
+                        f"health checks. {failure_msgs} Re-train the model or "
+                        f"pass ?skip_health_checks=true to override (audit-logged)."
                     ),
+                )
+            if non_blocking_failures:
+                # Calibration FAIL etc. — log it, continue activation,
+                # the warning shows up on the model page anyway
+                logger.warning(
+                    "Activating policy %s with non-blocking health failures: %s",
+                    target_policy.id,
+                    "; ".join(f"{f['check']}: {f['message']}"
+                             for f in non_blocking_failures),
                 )
             # Persist the latest health report + distribution baseline
             # on the model. The baseline is fixed at the moment of

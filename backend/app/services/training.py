@@ -386,10 +386,23 @@ class TrainingService:
                       f"{self._display_name(name)} holdout AUC: {auc:.4f} · {cv_vs_holdout} — "
                       f"{'good generalization' if best_cv_score and abs(auc - best_cv_score) < 0.02 else 'check overfitting' if best_cv_score and auc < best_cv_score - 0.02 else 'validated'}")
 
-            # ── TASK-10 Layer 1: training-time health checks ──
-            # Run all six checks on the holdout predictions. FAIL blocks
-            # artifact save (the model is mathematically broken). WARN
-            # saves the artifact but flags it on the model record.
+            # ── Health checks (training-time) ─────────────────────────
+            # Run all six checks on the holdout predictions. Health checks
+            # are DIAGNOSTIC at training time — never gating. The artifact
+            # is always saved so the user retains their work and can
+            # inspect what's wrong. The health report is persisted on the
+            # model record and surfaced prominently in the UI; the user
+            # decides whether to publish based on visible signals, not
+            # have the pipeline silently drop their model.
+            #
+            # Rationale: in finance, target imbalance is the norm. Strict
+            # H5 calibration thresholds (5pp WARN / 15pp FAIL) trip
+            # routinely on legitimate credit/fraud data even after our
+            # post-hoc isotonic calibration step. Refusing to save under
+            # those conditions would block normal workflows. Real model
+            # breakage (NaN/Inf, saturation, mode collapse) still gets
+            # surfaced — the artifact saves with health_status='warning'
+            # so downstream gates (Layer 2 registration) can decide.
             from app.services.inference_health import InferenceHealthChecker
             health_report = InferenceHealthChecker().run_all(
                 predictions=preds,
@@ -397,15 +410,15 @@ class TrainingService:
             )
 
             if health_report.status == "FAIL":
-                failures = ", ".join(
+                failures = " · ".join(
                     f"{r.check_name}: {r.message}" for r in health_report.failures
                 )
-                self.emit(job_id, f"health_{name}", "error",
-                          f"{self._display_name(name)} health checks FAILED — "
-                          f"artifact NOT saved. {failures}")
-                logger.error(f"Health check FAIL for {name}: {failures}")
-                # Skip this model — don't save the artifact
-                continue
+                self.emit(job_id, f"health_{name}", "warn",
+                          f"{self._display_name(name)} flagged at training "
+                          f"({len(health_report.failures)} failing checks) — "
+                          f"artifact saved for review. {failures}")
+                logger.warning(f"Health check FAIL for {name} (saved anyway): {failures}")
+                # Fall through to artifact save — never block here
             elif health_report.status == "WARN":
                 warnings_text = " · ".join(
                     f"{r.check_name}: {r.message}"
