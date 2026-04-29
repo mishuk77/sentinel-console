@@ -101,10 +101,50 @@ export function ColumnAnnotationEditor({ dataset, open, onClose }: ColumnAnnotat
                 <div className="p-5 space-y-6 text-sm">
                     <p className="text-xs text-muted-foreground">
                         Tag columns by their semantic role. These tags drive how dollar
-                        metrics are computed (TASK-6 Mode 1/2/3), enable applicant-level
-                        traceability in backtests, and unlock segment breakouts on
-                        comparison tables.
+                        metrics are computed, enable applicant-level traceability in
+                        backtests, and unlock segment breakouts on comparison tables.
                     </p>
+
+                    {/* Mode explainer — discoverable docs for new users */}
+                    <details className="text-xs border border-border rounded p-3 bg-muted/10">
+                        <summary className="cursor-pointer text-foreground font-medium select-none">
+                            How dollar metrics are computed (Mode 1 / 2 / 3)
+                        </summary>
+                        <div className="mt-3 space-y-2.5 text-muted-foreground">
+                            <div className="flex gap-2.5">
+                                <span className="badge badge-blue text-2xs shrink-0 mt-0.5">Mode 1</span>
+                                <p>
+                                    <strong className="text-foreground">Loss amount column set</strong> —
+                                    we use the actual dollar amount lost per defaulted application
+                                    (e.g. <span className="font-mono">charge_off_amount</span>).
+                                    Most accurate. Required for sub-principal recovery scenarios.
+                                </p>
+                            </div>
+                            <div className="flex gap-2.5">
+                                <span className="badge badge-green text-2xs shrink-0 mt-0.5">Mode 2</span>
+                                <p>
+                                    <strong className="text-foreground">Approved-amount column set</strong>,
+                                    no loss column — we assume full principal at risk on default
+                                    (the standard credit assumption when LGD data isn't available).
+                                    Loss = approved_amount × predicted_probability.
+                                </p>
+                            </div>
+                            <div className="flex gap-2.5">
+                                <span className="badge badge-muted text-2xs shrink-0 mt-0.5">Mode 3</span>
+                                <p>
+                                    <strong className="text-foreground">Neither set</strong> —
+                                    we can only compute count metrics (number of approvals,
+                                    expected number of defaulters). Dollar columns show "—" until
+                                    you tag at least an approved-amount column.
+                                </p>
+                            </div>
+                            <p className="text-2xs italic pt-1 border-t border-border/50">
+                                Mode is determined per (model, dataset) pair. The active mode is
+                                always shown as a footnote beneath every dollar-bearing table,
+                                and on the Datasets list as a Mode 1/2/3 badge per row.
+                            </p>
+                        </div>
+                    </details>
 
                     {/* Approved amount column */}
                     <Field

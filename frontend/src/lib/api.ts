@@ -56,6 +56,22 @@ export interface Dataset {
     created_at: string;
 }
 
+export type HealthStatus = "healthy" | "warning" | "FAIL" | "WARN" | "PASS" | "degraded" | null;
+
+export interface HealthCheckResult {
+    check_name: string;
+    status: "PASS" | "WARN" | "FAIL";
+    observed_value: number;
+    threshold_warn: number | null;
+    threshold_fail: number | null;
+    message: string;
+}
+
+export interface HealthReport {
+    status: "PASS" | "WARN" | "FAIL";
+    results: HealthCheckResult[];
+}
+
 export interface MLModel {
     id: string;
     decision_system_id?: string;
@@ -63,6 +79,16 @@ export interface MLModel {
     name: string;
     algorithm: string;
     status: "TRAINING" | "CANDIDATE" | "ACTIVE" | "ARCHIVED" | "FAILED";
+
+    // TASK-6 outcome flag + loss handling
+    target_column?: string | null;
+    loss_amount_column?: string | null;
+
+    // TASK-10 Layer 1 + Layer 3 health
+    health_status?: HealthStatus;
+    health_report?: HealthReport | null;
+    distribution_baseline?: number[] | null;
+
     metrics?: {
         auc?: number;
         gini?: number;
@@ -110,6 +136,8 @@ export interface MLModel {
     created_at: string;
 }
 
+export type PolicyState = "draft" | "published" | "archived";
+
 export interface Policy {
     id: string;
     model_id: string;
@@ -118,7 +146,13 @@ export interface Policy {
     target_decile?: number;
     projected_approval_rate?: number;
     projected_loss_rate?: number;
+    amount_ladder?: Record<string, number> | null;
     is_active: boolean;
+    // TASK-11E publish workflow
+    state?: PolicyState | null;
+    last_published_at?: string | null;
+    published_by?: string | null;
+    published_snapshot?: Record<string, any> | null;
     created_at?: string;
 }
 
@@ -140,6 +174,10 @@ export interface DecisionSystem {
     // Active pointers
     active_model_id?: string;
     active_policy_id?: string;
+
+    // TASK-10 Layer 3 — set by the runtime inference health monitor
+    runtime_health_status?: "healthy" | "warning" | "degraded" | null;
+
 
     // Summaries for easy UI display
     active_model_summary?: {

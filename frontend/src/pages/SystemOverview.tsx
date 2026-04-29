@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { MODULE_REGISTRY, MODULE_ORDER, getModulesForSystemType } from "@/lib/modules";
+import { HealthStatusBadge } from "@/components/ui/HealthStatusBadge";
 
 const CHART_PRIMARY = "hsl(210,100%,58%)";
 
@@ -37,7 +38,15 @@ export default function SystemOverview() {
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="page-title">System Overview</h2>
+                    <h2 className="page-title flex items-center gap-3">
+                        System Overview
+                        {/* TASK-10 Layer 3: surfaces runtime monitor verdict */}
+                        <HealthStatusBadge
+                            status={(system as any)?.runtime_health_status}
+                            size="sm"
+                            layerLabel="Layer 3 (runtime monitor)"
+                        />
+                    </h2>
                     <p className="page-desc">{system.description || "No description provided."}</p>
                 </div>
                 <div className="flex gap-3">

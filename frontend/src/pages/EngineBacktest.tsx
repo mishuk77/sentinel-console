@@ -48,11 +48,11 @@ interface BacktestSummary {
     total_approved_dollars?: number;
     total_predicted_loss_dollars?: number;
     has_outcomes: number;
-    auc?: number;
-    ks_statistic?: number;
-    brier_score?: number;
-    brier_skill_score?: number;
-    calibration_error_pp?: number;
+    auc?: number | null;
+    ks_statistic?: number | null;
+    brier_score?: number | null;
+    brier_skill_score?: number | null;
+    calibration_error_pp?: number | null;
     error_message?: string;
     parquet_available?: boolean;
 }
@@ -159,6 +159,11 @@ export default function EngineBacktest() {
                                 <th>Dataset</th>
                                 <th className="text-right">Rows</th>
                                 <th className="text-right">Approved</th>
+                                <th className="text-right" title="Approved $ — only available when dataset has an approved-amount column">Approved $</th>
+                                <th className="text-right" title="AUC on rows with known outcomes">AUC</th>
+                                <th className="text-right" title="Kolmogorov-Smirnov separation between defaulters and non-defaulters">KS</th>
+                                <th className="text-right" title="Brier skill score — improvement over base-rate baseline. Positive = better than baseline">Brier skill</th>
+                                <th className="text-right" title="Calibration error in pp — |predicted mean − observed mean|">Cal err</th>
                                 <th className="text-right">Latency</th>
                                 <th>Started</th>
                             </tr>
@@ -180,6 +185,33 @@ export default function EngineBacktest() {
                                     <td className="text-xs">{r.dataset_filename || "—"}</td>
                                     <td className="text-right"><MetricValue type="count" value={r.rows_processed} /></td>
                                     <td className="text-right"><MetricValue type="count" value={r.n_approved} /></td>
+                                    <td className="text-right"><MetricValue type="currency" value={r.total_approved_dollars ?? null} /></td>
+                                    <td className="text-right">
+                                        {r.has_outcomes && r.auc !== undefined && r.auc !== null
+                                            ? <span className={r.auc > 0.75 ? "text-up" : r.auc > 0.65 ? "text-warn" : "text-down"}>
+                                                {r.auc.toFixed(3)}
+                                              </span>
+                                            : <span className="text-muted-foreground">—</span>}
+                                    </td>
+                                    <td className="text-right">
+                                        {r.has_outcomes && r.ks_statistic !== undefined && r.ks_statistic !== null
+                                            ? r.ks_statistic.toFixed(3)
+                                            : <span className="text-muted-foreground">—</span>}
+                                    </td>
+                                    <td className="text-right">
+                                        {r.has_outcomes && r.brier_skill_score !== undefined && r.brier_skill_score !== null
+                                            ? <span className={r.brier_skill_score > 0 ? "text-up" : "text-down"}>
+                                                {r.brier_skill_score.toFixed(3)}
+                                              </span>
+                                            : <span className="text-muted-foreground">—</span>}
+                                    </td>
+                                    <td className="text-right">
+                                        {r.has_outcomes && r.calibration_error_pp !== undefined && r.calibration_error_pp !== null
+                                            ? <span className={r.calibration_error_pp < 0.02 ? "text-up" : r.calibration_error_pp < 0.05 ? "text-warn" : "text-down"}>
+                                                {(r.calibration_error_pp * 100).toFixed(2)}pp
+                                              </span>
+                                            : <span className="text-muted-foreground">—</span>}
+                                    </td>
                                     <td className="text-right">{r.avg_latency_ms?.toFixed(1) ?? "—"} ms</td>
                                     <td className="text-2xs text-muted-foreground">
                                         {r.started_at ? new Date(r.started_at).toLocaleString() : "—"}
@@ -202,6 +234,9 @@ export default function EngineBacktest() {
 // ────────────────────────────────────────────────────────────────────────
 
 function RunDetail({ run, onClose }: { run: BacktestSummary; onClose: () => void }) {
+    // Row-level filter — "all", "errors", "warnings", "approve", "deny"
+    const [rowFilter, setRowFilter] = useState<"all" | "errors" | "warnings" | "approve" | "deny">("all");
+
     const { data: rowsResp } = useQuery({
         queryKey: ["backtest-rows", run.id],
         queryFn: async () => {
@@ -320,9 +355,34 @@ function RunDetail({ run, onClose }: { run: BacktestSummary; onClose: () => void
             <div className="panel">
                 <div className="panel-head">
                     <span className="panel-title">Row-Level Drill-Down</span>
-                    <span className="text-xs text-muted-foreground">
-                        first {rowsResp?.rows?.length ?? 0} rows
-                    </span>
+                    <div className="flex items-center gap-3">
+                        {/* Filter pills — let users isolate errors/warnings */}
+                        <div className="flex items-center gap-1">
+                            {([
+                                ["all", "All", null],
+                                ["errors", "Errors", run.rows_errors],
+                                ["warnings", "Warnings", run.rows_warnings],
+                                ["approve", "Approved", run.n_approved],
+                                ["deny", "Denied", run.n_denied],
+                            ] as const).map(([key, label, n]) => (
+                                <button
+                                    key={key}
+                                    onClick={() => setRowFilter(key as any)}
+                                    className={cn(
+                                        "px-2 py-0.5 text-2xs rounded-full border transition-colors",
+                                        rowFilter === key
+                                            ? "bg-info/15 border-info/40 text-info"
+                                            : "border-border text-muted-foreground hover:border-info/30",
+                                    )}
+                                >
+                                    {label}{n !== null && n !== undefined ? ` (${n.toLocaleString()})` : ""}
+                                </button>
+                            ))}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                            first {rowsResp?.rows?.length ?? 0} rows
+                        </span>
+                    </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="dt dt-hover">
@@ -334,10 +394,20 @@ function RunDetail({ run, onClose }: { run: BacktestSummary; onClose: () => void
                                 <th className="text-right">Approved $</th>
                                 <th>Outcome</th>
                                 <th>Top reasons (SHAP)</th>
+                                <th>Diagnostic</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {(rowsResp?.rows || []).map((row: any) => (
+                            {(rowsResp?.rows || [])
+                                .filter((row: any) => {
+                                    if (rowFilter === "all") return true;
+                                    if (rowFilter === "errors") return !!row.error_message;
+                                    if (rowFilter === "warnings") return !!row.warning_flags && row.warning_flags.length > 0;
+                                    if (rowFilter === "approve") return row.decision === "approve";
+                                    if (rowFilter === "deny") return row.decision === "deny";
+                                    return true;
+                                })
+                                .map((row: any) => (
                                 <tr key={row.row_index}>
                                     <td className="font-mono text-xs">{row.application_id}</td>
                                     <td className="text-right"><MetricValue type="ratio" value={row.score} /></td>
@@ -377,8 +447,36 @@ function RunDetail({ run, onClose }: { run: BacktestSummary; onClose: () => void
                                             <span className="text-muted-foreground text-2xs">—</span>
                                         )}
                                     </td>
+                                    <td className="text-2xs">
+                                        {row.error_message ? (
+                                            <span className="text-down" title={row.error_message}>
+                                                <AlertTriangle className="inline h-3 w-3 mr-0.5" />
+                                                Error: {row.error_message.length > 30 ? row.error_message.slice(0, 30) + "..." : row.error_message}
+                                            </span>
+                                        ) : row.warning_flags && row.warning_flags.length > 0 ? (
+                                            <span className="text-warn" title={JSON.stringify(row.warning_flags)}>
+                                                {row.warning_flags.length} warning{row.warning_flags.length === 1 ? "" : "s"}
+                                            </span>
+                                        ) : (
+                                            <span className="text-muted-foreground">clean</span>
+                                        )}
+                                    </td>
                                 </tr>
                             ))}
+                            {(rowsResp?.rows || []).filter((row: any) => {
+                                if (rowFilter === "all") return true;
+                                if (rowFilter === "errors") return !!row.error_message;
+                                if (rowFilter === "warnings") return !!row.warning_flags && row.warning_flags.length > 0;
+                                if (rowFilter === "approve") return row.decision === "approve";
+                                if (rowFilter === "deny") return row.decision === "deny";
+                                return true;
+                            }).length === 0 && (
+                                <tr>
+                                    <td colSpan={7} className="text-center text-muted-foreground py-6 text-xs">
+                                        No rows match the "{rowFilter}" filter in the first 1000 row sample.
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>

@@ -447,20 +447,42 @@ export default function Policy() {
                                             value={policyName}
                                             onChange={(e) => setPolicyName(e.target.value)}
                                         />
-                                        {/* TASK-2 acceptance: visible 'Last saved' timestamp */}
+                                        {/* TASK-2 + TASK-11E: visible policy state, last published, by-whom */}
                                         {(() => {
                                             const activePolicy = policies?.find((p: any) => p.is_active);
-                                            const ts = activePolicy?.last_published_at;
-                                            if (!ts) return null;
-                                            const formatted = new Date(ts).toLocaleString(undefined, {
+                                            if (!activePolicy) return null;
+                                            const ts = activePolicy.last_published_at;
+                                            const by = activePolicy.published_by;
+                                            const state = activePolicy.state;
+                                            const formatted = ts ? new Date(ts).toLocaleString(undefined, {
                                                 year: "numeric", month: "short", day: "2-digit",
                                                 hour: "2-digit", minute: "2-digit",
-                                            });
+                                            }) : null;
                                             return (
-                                                <p className="text-xs text-muted-foreground mb-3 flex items-center gap-1.5">
-                                                    <CheckCircle className="h-3 w-3 text-up" />
-                                                    Last saved: <span className="font-medium text-foreground">{formatted}</span>
-                                                </p>
+                                                <div className="mb-3 space-y-1.5 p-3 rounded bg-info/5 border border-info/20">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={cn(
+                                                            "text-2xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded",
+                                                            state === "published" ? "bg-up/15 text-up" :
+                                                            state === "draft" ? "bg-warn/15 text-warn" :
+                                                            "bg-muted text-muted-foreground",
+                                                        )}>
+                                                            {state || "unknown"}
+                                                        </span>
+                                                        <span className="text-2xs text-muted-foreground">
+                                                            cutoff <span className="font-mono text-foreground">{activePolicy.threshold?.toFixed(4)}</span>
+                                                        </span>
+                                                    </div>
+                                                    {formatted && (
+                                                        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                                            <CheckCircle className="h-3 w-3 text-up" />
+                                                            Last published: <span className="font-medium text-foreground">{formatted}</span>
+                                                        </p>
+                                                    )}
+                                                    {by && (
+                                                        <p className="text-2xs text-muted-foreground pl-[18px]">by <span className="font-mono">{by}</span></p>
+                                                    )}
+                                                </div>
                                             );
                                         })()}
                                         <button
@@ -1227,6 +1249,7 @@ function SegmentationTab({
                                 key={globalSegment.id}
                                 segment={globalSegment}
                                 globalDefaultRate={globalDefaultRate}
+                                globalThreshold={globalThreshold}
                                 isSelected={selectedSegmentId === globalSegment.id}
                                 isPendingDelete={pendingDeleteId === globalSegment.id}
                                 isDeleting={deletingId === globalSegment.id}
@@ -1243,6 +1266,7 @@ function SegmentationTab({
                                 key={seg.id}
                                 segment={seg}
                                 globalDefaultRate={globalDefaultRate}
+                                globalThreshold={globalThreshold}
                                 isSelected={selectedSegmentId === seg.id}
                                 isPendingDelete={pendingDeleteId === seg.id}
                                 isDeleting={deletingId === seg.id}
@@ -1294,14 +1318,29 @@ function SegmentationTab({
 
 function TierBadge({ tier }: { tier: PolicySegment["confidence_tier"] }) {
     if (!tier) return <span className="text-xs text-muted-foreground">—</span>;
-    const map: Record<string, { cls: string; label: string }> = {
-        green:  { cls: "bg-green-100 text-green-800",   label: "High" },
-        yellow: { cls: "bg-yellow-100 text-yellow-800", label: "Low Sample" },
-        red:    { cls: "bg-red-100 text-red-800",       label: "Insufficient" },
+    const map: Record<string, { cls: string; label: string; tooltip: string }> = {
+        green:  {
+            cls: "bg-green-100 text-green-800",
+            label: "High",
+            tooltip: "Sufficient sample size — segment-specific threshold is statistically meaningful and used at runtime.",
+        },
+        yellow: {
+            cls: "bg-yellow-100 text-yellow-800",
+            label: "Low Sample",
+            tooltip: "Borderline sample size — threshold is computed but with wider confidence bounds. Review before relying on it for production decisions.",
+        },
+        red:    {
+            cls: "bg-red-100 text-red-800",
+            label: "Insufficient",
+            tooltip: "Sample size too small for a stable threshold — runtime falls back to the parent segment / global threshold. Add data or broaden the segment to upgrade tier.",
+        },
     };
-    const { cls, label } = map[tier] ?? { cls: "", label: tier };
+    const { cls, label, tooltip } = map[tier] ?? { cls: "", label: tier, tooltip: "" };
     return (
-        <span className={cn("px-2 py-0.5 rounded-full text-xs font-semibold", cls)}>
+        <span
+            className={cn("px-2 py-0.5 rounded-full text-xs font-semibold cursor-help", cls)}
+            title={tooltip}
+        >
             {label}
         </span>
     );
@@ -1330,11 +1369,13 @@ function FilterTags({ filters }: { filters: Record<string, string> }) {
 // ─── Segment Row ──────────────────────────────────────────────────────────────
 
 function SegmentRow({
-    segment, globalDefaultRate, isSelected, onClick,
+    segment, globalDefaultRate, globalThreshold = 0, isSelected, onClick,
     isPendingDelete, isDeleting, onDeleteClick, onDeleteConfirm, onDeleteCancel
 }: {
     segment: PolicySegment;
     globalDefaultRate: number;
+    /** Used to surface the actual fallback target on red-tier segments */
+    globalThreshold?: number;
     isSelected: boolean;
     onClick: () => void;
     isPendingDelete?: boolean;
@@ -1392,17 +1433,35 @@ function SegmentRow({
                 )}
             </td>
             <td className="px-5 py-3.5 text-right tabular-nums font-mono text-sm">
-                {segment.confidence_tier === "red"
-                    ? <span className="text-muted-foreground text-xs italic">inherited</span>
-                    : effectiveThreshold !== null
-                        ? <>
-                            {effectiveThreshold.toFixed(4)}
-                            {segment.override_threshold !== null && (
-                                <span className="ml-1 text-xs text-amber-600 font-sans">✎</span>
-                            )}
-                          </>
-                        : <span className="text-muted-foreground text-xs">—</span>
-                }
+                {segment.confidence_tier === "red" ? (
+                    // TASK-11G-style: surface the actual fallback target so users
+                    // understand WHERE this red segment's runtime threshold comes
+                    // from (parent segment via fallback_segment_id, or global).
+                    <span
+                        className="text-muted-foreground text-xs italic font-sans cursor-help"
+                        title={
+                            (segment as any).fallback_segment_id
+                                ? `Falls back to parent segment ${(segment as any).fallback_segment_id.slice(0, 8)} (sample too small for a standalone threshold)`
+                                : `Falls back to the global cutoff ${globalThreshold.toFixed(4)} (no parent segment configured)`
+                        }
+                    >
+                        ↳ {(segment as any).fallback_segment_id
+                            ? `parent ${(segment as any).fallback_segment_id.slice(0, 6)}`
+                            : `global ${globalThreshold.toFixed(4)}`}
+                    </span>
+                ) : effectiveThreshold !== null ? (
+                    <>
+                        {effectiveThreshold.toFixed(4)}
+                        {segment.override_threshold !== null && (
+                            <span
+                                className="ml-1 text-xs text-amber-600 font-sans cursor-help"
+                                title="Manual analyst override — this threshold was set explicitly, overriding the system-derived value"
+                            >✎</span>
+                        )}
+                    </>
+                ) : (
+                    <span className="text-muted-foreground text-xs">—</span>
+                )}
             </td>
             <td className="px-5 py-3.5 text-center">
                 <TierBadge tier={segment.confidence_tier} />

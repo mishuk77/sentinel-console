@@ -23,6 +23,7 @@ import {
     ChevronDown,
     ChevronUp,
     Zap,
+    FileText,
     Target,
     TrendingUp,
     Clock
@@ -392,6 +393,7 @@ export default function FraudRules() {
     const [simulation, setSimulation] = useState<{ rule: FraudRule; result: FraudRuleSimulation } | null>(null);
     const [expandedRule, setExpandedRule] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+    const [showFieldReference, setShowFieldReference] = useState(false);
 
     const activeRules = rules.filter((r) => r.is_active);
     const inactiveRules = rules.filter((r) => !r.is_active);
@@ -616,16 +618,30 @@ export default function FraudRules() {
                         Configure automated fraud detection rules and thresholds.
                     </p>
                 </div>
-                <button
-                    onClick={() => {
-                        setEditingRule(undefined);
-                        setShowEditor(true);
-                    }}
-                    className="btn-primary btn-sm inline-flex items-center gap-2"
-                >
-                    <Plus className="h-4 w-4" /> Create Rule
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setShowFieldReference(true)}
+                        className="btn-ghost btn-sm inline-flex items-center gap-2"
+                        title="See all available fields you can reference in rule conditions"
+                    >
+                        <FileText className="h-4 w-4" /> Field reference
+                    </button>
+                    <button
+                        onClick={() => {
+                            setEditingRule(undefined);
+                            setShowEditor(true);
+                        }}
+                        className="btn-primary btn-sm inline-flex items-center gap-2"
+                    >
+                        <Plus className="h-4 w-4" /> Create Rule
+                    </button>
+                </div>
             </div>
+
+            {/* Field reference modal */}
+            {showFieldReference && (
+                <FieldReferenceModal onClose={() => setShowFieldReference(false)} />
+            )}
 
             {/* Summary */}
             <div className="grid grid-cols-3 gap-4">
@@ -708,6 +724,74 @@ export default function FraudRules() {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// FieldReferenceModal — surfaces the available fields users can reference
+// in rule conditions. Sourced from RULE_FIELDS (in sync with backend
+// /fraud/rules/fields endpoint). Helps users discover what data they
+// have to work with without having to start a rule and explore the
+// dropdown.
+// ────────────────────────────────────────────────────────────────────────
+
+function FieldReferenceModal({ onClose }: { onClose: () => void }) {
+    // Group by category for easier scanning
+    const grouped = RULE_FIELDS.reduce<Record<string, typeof RULE_FIELDS>>((acc, f) => {
+        const cat = (f as any).category || "General";
+        (acc[cat] = acc[cat] || []).push(f);
+        return acc;
+    }, {});
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="panel max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+                <div className="panel-head sticky top-0 bg-card z-10">
+                    <div>
+                        <span className="panel-title">Available fields for rule conditions</span>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                            {RULE_FIELDS.length} fields available across {Object.keys(grouped).length} categories.
+                            Reference these in the field dropdown when building conditions.
+                        </p>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+                <div className="p-5 space-y-5">
+                    {Object.entries(grouped).map(([category, fields]) => (
+                        <div key={category}>
+                            <h3 className="text-2xs uppercase font-bold text-muted-foreground tracking-wider mb-2">
+                                {category}
+                            </h3>
+                            <table className="dt text-xs">
+                                <thead>
+                                    <tr>
+                                        <th>Field</th>
+                                        <th>Label</th>
+                                        <th>Type</th>
+                                        <th>Description</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {fields.map((f) => (
+                                        <tr key={f.field}>
+                                            <td className="font-mono text-2xs text-info">{f.field}</td>
+                                            <td>{f.label}</td>
+                                            <td className="text-muted-foreground text-2xs">{(f as any).type || "—"}</td>
+                                            <td className="text-muted-foreground text-2xs">{(f as any).description || "—"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ))}
+                </div>
+            </div>
         </div>
     );
 }

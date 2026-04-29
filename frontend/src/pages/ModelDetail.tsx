@@ -5,6 +5,8 @@ import type { MLModel } from "@/lib/api";
 import { api } from "@/lib/api";
 import { ArrowLeft, BarChart2, Shield, FileDown, Loader2, Cpu, Zap, ShieldCheck, Layers, ChevronDown, ChevronUp, FlaskConical, Target, Scale, Scissors, Binary, GitMerge } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { HealthStatusBadge } from "@/components/ui/HealthStatusBadge";
+import { HealthReportPanel } from "@/components/ui/HealthReportPanel";
 import {
     BarChart, Bar, LineChart, Line, AreaChart, Area,
     XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -121,9 +123,19 @@ export default function ModelDetail() {
                                 <Shield className="h-3 w-3" /> ACTIVE CHAMPION
                             </span>
                         )}
+                        <HealthStatusBadge
+                            status={model.health_status}
+                            size="sm"
+                            layerLabel="Layer 1 (training-time)"
+                        />
                     </h1>
                     <p className="text-xs text-muted-foreground mt-1 font-mono">
                         {model.name} • ID: {model.id}
+                        {model.target_column && (
+                            <span className="ml-2">
+                                · Target: <span className="text-foreground">{model.target_column}</span>
+                            </span>
+                        )}
                     </p>
                 </div>
                 <div className="flex gap-3">
@@ -770,6 +782,73 @@ export default function ModelDetail() {
                     </div>
                 );
             })()}
+
+            {/* TASK-9 / TASK-10: full health report + distribution baseline */}
+            <HealthReportPanel report={model.health_report} />
+
+            {model.distribution_baseline && model.distribution_baseline.length > 0 && (
+                <DistributionBaselinePanel quantiles={model.distribution_baseline} />
+            )}
+        </div>
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// DistributionBaselinePanel — TASK-10 H6
+// ────────────────────────────────────────────────────────────────────────
+//
+// At policy publish (Layer 2 registration), we capture the prediction
+// distribution as 10 quantiles (P5..P95). The Layer 3 runtime monitor
+// uses this as the FIXED baseline for KS-based drift detection. Surface
+// the baseline so users can see what their runtime predictions are
+// being compared against.
+
+function DistributionBaselinePanel({ quantiles }: { quantiles: number[] }) {
+    const labels = ["P5", "P15", "P25", "P35", "P45", "P55", "P65", "P75", "P85", "P95"];
+    const data = quantiles.map((q, i) => ({
+        percentile: labels[i] || `Q${i + 1}`,
+        score: q,
+    }));
+    return (
+        <div className="panel">
+            <div className="panel-head">
+                <span className="panel-title">Registration Distribution Baseline</span>
+                <span className="text-2xs text-muted-foreground">
+                    fixed at registration · drives Layer 3 H6 (KS drift)
+                </span>
+            </div>
+            <div className="p-5">
+                <p className="text-xs text-muted-foreground mb-4">
+                    These are the prediction-score quantiles captured the moment this
+                    model was registered. The runtime health monitor compares the
+                    distribution of recent production predictions against these
+                    quantiles every 5 minutes — a meaningful KS shift triggers a
+                    health-status downgrade. The baseline is fixed; if the population
+                    genuinely changes, retrain and re-register to capture a new one.
+                </p>
+                <div className="h-[180px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={data} margin={{ top: 8, right: 16, left: -10, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                            <XAxis dataKey="percentile" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                            <YAxis domain={[0, 1]} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                            <Tooltip
+                                contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)", fontSize: "11px" }}
+                                formatter={((v: number | undefined) => (v ?? 0).toFixed(4)) as any}
+                            />
+                            <Line type="monotone" dataKey="score" stroke="hsl(210,100%,58%)" strokeWidth={2} dot={{ r: 3 }} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+                <div className="mt-3 grid grid-cols-5 gap-2 text-2xs">
+                    {data.slice(0, 5).map(({ percentile, score }) => (
+                        <div key={percentile} className="bg-muted/20 rounded px-2 py-1">
+                            <span className="text-muted-foreground">{percentile}</span>
+                            <span className="ml-1 font-mono">{score.toFixed(4)}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
         </div>
     );
 }
