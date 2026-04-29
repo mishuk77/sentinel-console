@@ -142,6 +142,23 @@ export function ComparisonTable({
                     })}
                 </tbody>
             </table>
+            {/* Polarity legend — explains the green/red/gray Δ coloring */}
+            {showDelta && (
+                <div className="flex items-center gap-4 mt-2 px-1 text-2xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-up" />
+                        Favorable change
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-down" />
+                        Unfavorable change
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-muted-foreground/40" />
+                        Neutral / by design
+                    </span>
+                </div>
+            )}
         </div>
     );
 }

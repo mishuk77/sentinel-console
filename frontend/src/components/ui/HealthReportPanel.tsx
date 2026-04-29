@@ -54,6 +54,14 @@ export function HealthReportPanel({ report, title = "Model Health Guardrails", c
         );
     }
 
+    // Sort by severity (FAIL → WARN → PASS) so problems are at the top
+    // and a user scanning the panel sees what needs attention first.
+    const sortedResults = [...report.results].sort((a, b) => {
+        const severity = (s: string) => s === "FAIL" ? 0 : s === "WARN" ? 1 : 2;
+        return severity(a.status) - severity(b.status);
+    });
+    const failures = report.results.filter((r) => r.status === "FAIL");
+
     return (
         <div className={cn("panel", className)}>
             <div className="panel-head">
@@ -67,6 +75,23 @@ export function HealthReportPanel({ report, title = "Model Health Guardrails", c
                     )}>{report.status}</span>
                 </span>
             </div>
+            {failures.length > 0 && (
+                <div className="px-4 py-3 bg-down/5 border-b border-down/20">
+                    <p className="text-xs font-semibold text-down mb-1">
+                        Why this model is flagged
+                    </p>
+                    <ul className="text-2xs text-muted-foreground space-y-0.5 list-disc list-inside">
+                        {failures.map((r) => (
+                            <li key={r.check_name}>
+                                <span className="font-medium text-foreground">
+                                    {CHECK_NAMES[r.check_name] || r.check_name}:
+                                </span>{" "}
+                                {r.message}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
             <table className="dt">
                 <thead>
                     <tr>
@@ -78,7 +103,7 @@ export function HealthReportPanel({ report, title = "Model Health Guardrails", c
                     </tr>
                 </thead>
                 <tbody>
-                    {report.results.map((r) => (
+                    {sortedResults.map((r) => (
                         <CheckRow key={r.check_name} result={r} />
                     ))}
                 </tbody>

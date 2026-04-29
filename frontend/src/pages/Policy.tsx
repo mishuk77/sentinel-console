@@ -278,8 +278,8 @@ export default function Policy() {
 
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
-            {/* Step Indicator */}
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6">
+            {/* Step Indicator — uses semantic tokens so dark mode renders correctly */}
+            <div className="panel border-info/20 bg-info/[0.04] p-6">
                 <div className="flex items-center justify-between max-w-4xl mx-auto">
                     <div className="flex items-center gap-3 flex-1">
                         <div className="bg-primary text-primary-foreground rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg shadow-md">1</div>
