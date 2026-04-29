@@ -308,6 +308,78 @@ def test_unscaled_model_does_not_apply_scaler(
 # Direct reproduction of the legacy bug — proves the fix works
 # ─────────────────────────────────────────────────────────────────────────────
 
+def test_calibrated_classifier_serializes_and_predicts(
+    synthetic_credit_dataset, feature_columns,
+):
+    """
+    The post-hoc CalibratedClassifierCV wrapper applied for
+    class_weight='balanced' models must:
+      1. Round-trip through joblib (artifact serialization path)
+      2. Expose predict_proba() compatible with the schema-v2 inference path
+      3. Produce a predicted-mean closer to the observed base rate than
+         the raw class-weighted base estimator (the whole point of the
+         calibration step)
+    """
+    import io
+    import joblib
+    import numpy as np
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    df = synthetic_credit_dataset
+    X = df[feature_columns].copy()
+    y = df["charge_off"].astype(int)
+
+    pp = InferencePreprocessor()
+    X_processed = pp.fit_transform(X, y)
+    scaler = StandardScaler()
+    X_scaled = pd.DataFrame(
+        scaler.fit_transform(X_processed),
+        columns=X_processed.columns,
+        index=X_processed.index,
+    )
+
+    # Train a balanced LR (this is the case where calibration is needed)
+    raw_lr = LogisticRegression(max_iter=2000, class_weight="balanced", random_state=42)
+    raw_lr.fit(X_scaled, y)
+    raw_mean = float(raw_lr.predict_proba(X_scaled)[:, 1].mean())
+
+    # Apply calibration — same approach training.py uses
+    calibrated = CalibratedClassifierCV(raw_lr, method="isotonic", cv=3)
+    calibrated.fit(X_scaled, y)
+    cal_mean = float(calibrated.predict_proba(X_scaled)[:, 1].mean())
+    observed_rate = float(y.mean())
+
+    # The whole point: calibrated mean should be much closer to observed
+    # than the raw class-weighted mean.
+    assert abs(cal_mean - observed_rate) < abs(raw_mean - observed_rate), (
+        f"Calibration didn't help: raw mean {raw_mean:.3f}, "
+        f"calibrated {cal_mean:.3f}, observed {observed_rate:.3f}"
+    )
+
+    # Serialize the full schema-v2 artifact (calibrated model + preprocessor)
+    artifact = {
+        "model": calibrated,
+        "scaler": scaler,
+        "preprocessor": pp,
+        "use_scaled": True,
+        "columns": list(X_processed.columns),
+        "model_type": "logistic_regression",
+        "schema_version": 2,
+    }
+    buf = io.BytesIO()
+    joblib.dump(artifact, buf)
+    buf.seek(0)
+    loaded = joblib.load(buf)
+
+    # Predictions from loaded artifact match in-memory
+    raw_row = df.iloc[0][feature_columns].to_dict()
+    s1 = _infer_one(artifact, raw_row)
+    s2 = _infer_one(loaded, raw_row)
+    assert abs(s1 - s2) < 1e-9
+
+
 def test_legacy_bug_reproduced_then_fixed(
     synthetic_credit_dataset, feature_columns
 ):
