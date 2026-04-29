@@ -202,23 +202,32 @@ def _predict_proba_from_artifact(artifact, X_raw):
     raise ValueError(f"Unrecognised artifact dict keys: {list(artifact.keys())}")
 
 
-def _score_segment(X_raw, y, seg_mask, artifact):
+def _score_segment(X_raw, y, seg_mask, artifact, full_scores=None):
     """
     Filter X_raw/y to seg_mask rows, score with the model artifact, bin into deciles.
     `X_raw` is the original feature DataFrame (not one-hot encoded). The artifact
     helper handles schema-specific encoding internally.
 
+    `full_scores` (optional): pre-computed score array over the FULL X_raw. When
+    provided, we just slice it by mask instead of re-running predict per segment.
+    This is a major perf win when calibrating many segments — the preprocessor +
+    model only run once for the whole dataset.
+
     Returns list of calibration dicts or None if not enough data.
     """
     import pandas as pd
 
-    X_seg = X_raw[seg_mask.values].copy()
-    y_seg = y[seg_mask.values]
-    n = len(X_seg)
+    mask_values = seg_mask.values
+    y_seg = y[mask_values]
+    n = int(mask_values.sum())
     if n < 10:
         return None
 
-    scores = _predict_proba_from_artifact(artifact, X_seg)
+    if full_scores is not None:
+        scores = full_scores[mask_values]
+    else:
+        X_seg = X_raw[mask_values].copy()
+        scores = _predict_proba_from_artifact(artifact, X_seg)
     eval_df = pd.DataFrame({"score": scores, "target": y_seg.values})
     # Dynamic bins: ~200 obs per bin, capped 10–50, minimum 5
     n_bins = max(5, min(50, n // 200)) if n >= 100 else 5
@@ -540,7 +549,33 @@ async def calibrate_segments(
     Phase 2 (optional) — if target_bad_rate is provided, load the model artifact once,
     score every non-red segment, and set threshold to the max score where cumulative
     bad rate <= target_bad_rate.
+
+    Wrapped in a top-level try/except so unexpected exceptions surface a real
+    error message to the UI ("Calibration failed" with no detail was hiding
+    Railway gateway timeouts and unexpected DataFrame issues).
     """
+    import logging
+    import traceback
+    try:
+        return await _calibrate_segments_impl(policy_id, body, db, current_user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.getLogger(__name__).exception(
+            "calibrate_segments unhandled error policy_id=%s", policy_id
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Calibration failed: {type(e).__name__}: {str(e)[:300]}",
+        )
+
+
+async def _calibrate_segments_impl(
+    policy_id: str,
+    body: CalibrateRequest,
+    db: Session,
+    current_user: User,
+):
     import tempfile
     import os
     import pandas as pd
@@ -686,13 +721,27 @@ async def calibrate_segments(
             )
             artifact = None
 
+        # Score the FULL dataset ONCE. For 30+ segments, this is the difference
+        # between one preprocessor+predict pass and 30 — easily enough to keep
+        # us inside Railway's request-timeout window on a real dataset.
+        full_scores = None
         if artifact is not None:
+            try:
+                full_scores = _predict_proba_from_artifact(artifact, X_full)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Segment calibration: full-dataset scoring failed: %s", e
+                )
+                full_scores = None
+
+        if full_scores is not None:
             for seg in segments:
                 mask = seg_masks.get(seg.id)
                 if mask is None:
                     continue
                 try:
-                    cal = _score_segment(X_full, y_full, mask, artifact)
+                    cal = _score_segment(X_full, y_full, mask, artifact, full_scores=full_scores)
                 except Exception as e:
                     import logging
                     logging.getLogger(__name__).warning(
