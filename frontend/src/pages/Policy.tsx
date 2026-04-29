@@ -262,13 +262,20 @@ export default function Policy() {
             const policyId = res.data.id;
             await api.put(`/policies/${policyId}/activate`);
         },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["system", systemId] });
-            // Activate creates a new policy + flips state on the previous
-            // one. Both /policies and /models lists need to refresh so the
-            // UI reflects the new published state and "Last saved" timestamp.
+        onSuccess: async () => {
+            // Wait for the system query to refetch *before* invalidating
+            // segment queries. Otherwise segment caches refetch under the
+            // stale active_policy_id, pin themselves there, and the
+            // Segmentation tab keeps showing the previous global threshold.
+            await queryClient.invalidateQueries({ queryKey: ["system", systemId] });
             queryClient.invalidateQueries({ queryKey: ["policies", systemId] });
             queryClient.invalidateQueries({ queryKey: ["models", systemId] });
+            // All segment-scoped caches: list, per-segment calibration,
+            // and the 3-stage impact comparison. Wildcard match on the
+            // first key element so every variant is dropped.
+            queryClient.invalidateQueries({ queryKey: ["segments"] });
+            queryClient.invalidateQueries({ queryKey: ["segment-calibration"] });
+            queryClient.invalidateQueries({ queryKey: ["segment-impact"] });
             setActivationSuccess(true);
             setTimeout(() => setActivationSuccess(false), 3000);
         }
