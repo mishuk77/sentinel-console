@@ -799,6 +799,7 @@ export default function Policy() {
                         globalThreshold={(system as any)?.active_policy_summary?.threshold ?? 0}
                         globalDefaultRate={(system as any)?.active_policy_summary ? (1 - ((system as any).active_policy_summary.approval_rate || 0)) : 0}
                         datasetId={selectedModel?.dataset_id}
+                        onSwitchToGlobal={() => setActiveTab("global")}
                     />
                 </>
             )}
@@ -965,11 +966,15 @@ function SegmentationTab({
     globalThreshold,
     globalDefaultRate,
     datasetId,
+    onSwitchToGlobal,
 }: {
     policyId: string | undefined;
     globalThreshold: number;
     globalDefaultRate: number;
     datasetId: string | undefined;
+    /** Called when the user clicks the empty-state CTA to jump to the
+     *  Global Policy tab where they can configure & activate one. */
+    onSwitchToGlobal?: () => void;
 }) {
     const queryClient = useQueryClient();
     const [selectedSegment, setSelectedSegment] = useState<PolicySegment | null>(null);
@@ -1027,9 +1032,20 @@ function SegmentationTab({
             <div className="bg-card border rounded-xl p-12 flex flex-col items-center justify-center text-muted-foreground min-h-[400px]">
                 <Layers className="h-12 w-12 mb-4 opacity-20" />
                 <p className="font-semibold text-foreground mb-2">No active policy</p>
-                <p className="text-sm text-center max-w-xs">
-                    Configure and activate a Global Policy first, then return here to add segment-specific thresholds.
+                <p className="text-sm text-center max-w-md mb-5">
+                    Segment-specific thresholds layer on top of an existing global
+                    policy. Configure and activate a Global Policy first, then come
+                    back to fine-tune by population.
                 </p>
+                {onSwitchToGlobal && (
+                    <button
+                        onClick={onSwitchToGlobal}
+                        className="btn-primary inline-flex items-center gap-2"
+                    >
+                        <Scale className="h-4 w-4" />
+                        Configure Global Policy
+                    </button>
+                )}
             </div>
         );
     }
