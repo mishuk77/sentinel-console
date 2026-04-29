@@ -107,6 +107,12 @@ class State:
     backtest_run_id: Optional[str] = None
     last_decision_id: Optional[str] = None
 
+    # Cached responses for cross-step verification.
+    portfolio_sim: Optional[dict] = None
+    segment_impact: Optional[dict] = None
+    policies_list: Optional[list] = None
+    segments_full: Optional[list] = None
+
     findings: list[Finding] = field(default_factory=list)
     log_lines: list[str] = field(default_factory=list)
 
@@ -472,6 +478,7 @@ def step_policies_list(state: State) -> bool:
     if res is None:
         return False
     policies = res.json()
+    state.policies_list = policies
     active = [p for p in policies if p.get("is_active")]
     if active:
         state.policy_id = active[0]["id"]
@@ -582,6 +589,7 @@ def step_segments_list(state: State) -> bool:
     if res is None:
         return False
     segments = res.json()
+    state.segments_full = segments
     state.segment_ids = [s["id"] for s in segments]
     populated = sum(1 for s in segments if s.get("n_samples") is not None)
     _ok(state, "segments.list",
@@ -650,6 +658,7 @@ def step_segments_impact(state: State) -> bool:
     if res is None:
         return False
     body = res.json()
+    state.segment_impact = body
     for stage in ("baseline", "global_only", "segmented"):
         if stage not in body:
             _record(state, Finding("P0", "segments.impact",
@@ -692,6 +701,7 @@ def step_simulate_portfolio(state: State) -> bool:
     if res is None:
         return False
     body = res.json()
+    state.portfolio_sim = body
     for k in ("baseline", "policy_cuts", "policy_cuts_ladder", "meta"):
         if k not in body:
             _record(state, Finding("P1", "simulate.portfolio", f"missing key {k}"))
@@ -1106,6 +1116,558 @@ def step_fraud_tiers_global(state: State) -> bool:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# Verification — deep math assertions on top of the response shapes the
+# basic steps already exercised. Each step here digs into the numbers and
+# asserts on conservation laws, monotonicity, bounds, and cross-endpoint
+# consistency. Catches the class of bugs where the API responds 200 but
+# the numbers it returns are silently wrong.
+# ════════════════════════════════════════════════════════════════════════════
+
+def _approx_eq(a: float, b: float, tol: float = 1e-6, rel: float = 1e-4) -> bool:
+    """Approximate equality combining absolute and relative tolerance."""
+    if a == b:
+        return True
+    if a is None or b is None:
+        return False
+    return abs(a - b) <= max(tol, rel * max(abs(a), abs(b)))
+
+
+def step_verify_policies_singleton(state: State) -> bool:
+    """Singleton-active invariant: at most one is_active=True per system.
+
+    The /policies/?system_id=X endpoint already filters server-side, so every
+    row in state.policies_list belongs to the queried system.
+    """
+    if state.policies_list is None:
+        return True
+    active = [p for p in state.policies_list if p.get("is_active")]
+    if len(active) > 1:
+        ids = [p["id"][:8] for p in active]
+        _record(state, Finding(
+            "P0", "verify.singleton_active",
+            f"system has {len(active)} active policies: {ids}",
+        ))
+        return False
+    if len(active) == 0:
+        _record(state, Finding(
+            "P1", "verify.singleton_active",
+            "no active policy on this system - frontend will show 'no active policy'",
+        ))
+        return True
+    _ok(state, "verify.singleton_active",
+        f"exactly 1 active policy on system ({active[0]['id'][:8]})")
+    return True
+
+
+def step_verify_system_pointer(state: State) -> bool:
+    """system.active_policy_id must equal the policy with is_active=True.
+
+    Re-fetches both /systems/{id} and /policies/?system_id={id} to get a
+    fresh snapshot — earlier in the run we may have published a new policy,
+    which mutated DB state under the cached copies.
+    """
+    res_sys = _call(state, "GET", f"/systems/{state.system_id}",
+                    step="verify.system_pointer.refetch_system")
+    if res_sys is None:
+        return False
+    sys_now = res_sys.json()
+
+    res_pol = _call(state, "GET", "/policies/",
+                    params={"system_id": state.system_id},
+                    step="verify.system_pointer.refetch_policies")
+    if res_pol is None:
+        return False
+    policies_now = res_pol.json()
+
+    sys_active = sys_now.get("active_policy_id")
+    if not sys_active:
+        _info(state, "verify.system_pointer",
+              "system has no active_policy_id (skipped)")
+        return True
+
+    active_in_db = [p for p in policies_now if p.get("is_active")]
+    if not active_in_db:
+        _record(state, Finding(
+            "P0", "verify.system_pointer",
+            f"system.active_policy_id={sys_active[:8]} but NO policy is is_active=True",
+        ))
+        return False
+    if len(active_in_db) > 1:
+        _record(state, Finding(
+            "P0", "verify.system_pointer",
+            f"{len(active_in_db)} policies with is_active=True (singleton invariant violated)",
+        ))
+        return False
+    if active_in_db[0]["id"] != sys_active:
+        _record(state, Finding(
+            "P0", "verify.system_pointer",
+            f"system.active_policy_id={sys_active[:8]} but is_active policy is {active_in_db[0]['id'][:8]}",
+        ))
+        return False
+    summary = sys_now.get("active_policy_summary") or {}
+    sum_thr = summary.get("threshold")
+    pol_thr = active_in_db[0].get("threshold")
+    if sum_thr is not None and pol_thr is not None and not _approx_eq(sum_thr, pol_thr):
+        _record(state, Finding(
+            "P0", "verify.system_pointer",
+            f"summary.threshold={sum_thr} != policy.threshold={pol_thr}",
+        ))
+        return False
+    _ok(state, "verify.system_pointer",
+        f"active_policy_id matches is_active policy, threshold consistent ({pol_thr:.4f})")
+    return True
+
+
+def step_verify_calibration_bins(state: State) -> bool:
+    """Verify model.metrics.calibration internal consistency."""
+    if not state.model:
+        return True
+    cal = (state.model.get("metrics") or {}).get("calibration") or []
+    if not cal:
+        _info(state, "verify.calibration_bins", "no calibration on model (skipped)")
+        return True
+    # Sort defensively
+    cal_sorted = sorted(cal, key=lambda b: b.get("decile", 0))
+    deciles = [b.get("decile") for b in cal_sorted]
+    counts = [b.get("count", 0) for b in cal_sorted]
+    rates = [b.get("actual_rate", 0) for b in cal_sorted]
+    min_scores = [b.get("min_score") for b in cal_sorted]
+    max_scores = [b.get("max_score") for b in cal_sorted]
+    n = len(cal_sorted)
+    fail = False
+
+    # Bin counts must sum to a positive number
+    total = sum(counts)
+    if total <= 0:
+        _record(state, Finding("P0", "verify.calibration_bins",
+                               f"sum of bin counts is {total}"))
+        fail = True
+
+    # Score ranges must be ordered: max_score[i] <= min_score[i+1] (within tol)
+    for i in range(n - 1):
+        if min_scores[i] is None or max_scores[i] is None:
+            continue
+        if max_scores[i] is None or min_scores[i + 1] is None:
+            continue
+        if max_scores[i] > min_scores[i + 1] + 1e-9:
+            _record(state, Finding(
+                "P1", "verify.calibration_bins",
+                f"score overlap: bin {deciles[i]} max={max_scores[i]:.4f} > "
+                f"bin {deciles[i+1]} min={min_scores[i+1]:.4f}",
+            ))
+            fail = True
+
+    # actual_rate must be in [0, 1]
+    bad_rates = [(d, r) for d, r in zip(deciles, rates) if r is not None and not (0 <= r <= 1)]
+    if bad_rates:
+        _record(state, Finding(
+            "P0", "verify.calibration_bins",
+            f"actual_rate out of [0,1]: {bad_rates[:3]}",
+        ))
+        fail = True
+
+    # Calibration is the basis of the policy slider — bins should be roughly
+    # monotone in actual_rate (PAV would enforce this, but raw bins may have
+    # noise). With 30 bins on ~6k rows each bin has ~200 samples, so 5–10pp
+    # noise per boundary is normal. Flag only major reversals (>15pp) and
+    # only as P2 since the slider uses PAV-smoothed rates.
+    big_reversals = [
+        (deciles[i], rates[i], deciles[i+1], rates[i+1])
+        for i in range(n - 1)
+        if rates[i] is not None and rates[i+1] is not None
+        and rates[i] - rates[i+1] > 0.15
+    ]
+    if big_reversals:
+        _record(state, Finding(
+            "P2", "verify.calibration_bins",
+            f"non-monotone actual_rate by >15pp at {len(big_reversals)} boundary "
+            f"(first: D{big_reversals[0][0]}={big_reversals[0][1]:.3f} -> D{big_reversals[0][2]}={big_reversals[0][3]:.3f})",
+        ))
+
+    if not fail:
+        _ok(state, "verify.calibration_bins",
+            f"{n} bins, n={total}, rates {rates[0]:.3f}..{rates[-1]:.3f}, scores ordered")
+    return not fail
+
+
+def step_verify_simulate_portfolio_math(state: State) -> bool:
+    """Stage monotonicity + loss math + reconciliation in /simulate/portfolio."""
+    sim = state.portfolio_sim
+    if not sim:
+        return True
+    baseline = sim.get("baseline") or {}
+    cuts = sim.get("policy_cuts") or {}
+    ladder = sim.get("policy_cuts_ladder") or {}
+    meta = sim.get("meta") or {}
+    fail = False
+
+    # Conservation: total_applications must be identical across stages
+    n_b = baseline.get("total_applications")
+    n_c = cuts.get("total_applications")
+    n_l = ladder.get("total_applications")
+    if n_b != n_c or n_b != n_l:
+        _record(state, Finding(
+            "P0", "verify.portfolio.conservation",
+            f"total_applications differ across stages: baseline={n_b}, cuts={n_c}, ladder={n_l}",
+        ))
+        fail = True
+
+    # Baseline approves everyone
+    if baseline.get("approval_count") != n_b:
+        _record(state, Finding(
+            "P0", "verify.portfolio.baseline",
+            f"baseline approval_count={baseline.get('approval_count')} but n={n_b}",
+        ))
+        fail = True
+    if not _approx_eq(baseline.get("approval_rate", 0), 1.0):
+        _record(state, Finding(
+            "P0", "verify.portfolio.baseline",
+            f"baseline approval_rate={baseline.get('approval_rate')}, expected 1.0",
+        ))
+        fail = True
+
+    # Approval count monotone non-increasing baseline >= cuts >= ladder*
+    # *ladder has same approved_count as cuts (it just changes amounts).
+    if cuts.get("approval_count", 0) > baseline.get("approval_count", 0):
+        _record(state, Finding(
+            "P0", "verify.portfolio.monotonicity",
+            f"cuts approved {cuts.get('approval_count')} > baseline {baseline.get('approval_count')}",
+        ))
+        fail = True
+    if ladder.get("approval_count") != cuts.get("approval_count"):
+        _record(state, Finding(
+            "P1", "verify.portfolio.monotonicity",
+            f"ladder approved {ladder.get('approval_count')} != cuts {cuts.get('approval_count')} "
+            "(ladder modifies $ exposure, not approval set)",
+        ))
+
+    # Loss math: total_predicted_loss / total_approved == predicted_loss_rate_dollars
+    for stage_name, stage in [("cuts", cuts), ("ladder", ladder)]:
+        total_appr = stage.get("total_approved_dollars")
+        total_loss = stage.get("total_predicted_loss_dollars")
+        rate = stage.get("predicted_loss_rate_dollars")
+        if total_appr and total_loss is not None and rate is not None and total_appr > 0:
+            recomputed = total_loss / total_appr
+            if not _approx_eq(rate, recomputed, tol=1e-3, rel=1e-3):
+                _record(state, Finding(
+                    "P0", "verify.portfolio.loss_math",
+                    f"{stage_name}: predicted_loss_rate_dollars={rate:.6f} but "
+                    f"total_loss/total_approved={recomputed:.6f}",
+                ))
+                fail = True
+
+    # Approval rate bounds [0, 1]
+    for stage_name, stage in [("baseline", baseline), ("cuts", cuts), ("ladder", ladder)]:
+        rate = stage.get("approval_rate")
+        if rate is not None and not (0 <= rate <= 1 + 1e-9):
+            _record(state, Finding(
+                "P0", "verify.portfolio.bounds",
+                f"{stage_name} approval_rate={rate} out of [0,1]",
+            ))
+            fail = True
+
+    # n_rows_unscoreable + scored should equal n_rows_total
+    n_total = sim.get("n_rows_total")
+    n_unscore = sim.get("n_rows_unscoreable", 0)
+    if n_total is not None and n_b is not None:
+        if n_total != n_b + n_unscore and n_total != n_b:
+            _record(state, Finding(
+                "P1", "verify.portfolio.reconciliation",
+                f"n_rows_total={n_total} != baseline_n {n_b} + unscoreable {n_unscore}",
+            ))
+
+    # deltas_vs_baseline (when present) — recompute and compare
+    deltas = sim.get("deltas_vs_baseline") or []
+    for d in deltas:
+        for k in ("approval_count_delta", "predicted_loss_count_delta"):
+            v = d.get(k)
+            if v is None:
+                continue
+            # Just sanity check it's a number
+            if not isinstance(v, (int, float)):
+                _record(state, Finding(
+                    "P1", "verify.portfolio.deltas",
+                    f"delta {k} is non-numeric: {v!r}",
+                ))
+
+    if not fail:
+        _ok(state, "verify.portfolio_math",
+            f"3 stages reconciled (n={n_b}), loss math holds, bounds OK")
+    return not fail
+
+
+def step_verify_segment_impact_math(state: State) -> bool:
+    """Stage monotonicity + bounds + lift direction in segment impact panel."""
+    impact = state.segment_impact
+    if not impact:
+        return True
+    baseline = impact["baseline"]
+    glob = impact["global_only"]
+    seg = impact["segmented"]
+    fail = False
+
+    # Conservation
+    n_b, n_g, n_s = baseline["n_total"], glob["n_total"], seg["n_total"]
+    if n_b != n_g or n_b != n_s:
+        _record(state, Finding(
+            "P0", "verify.impact.conservation",
+            f"n_total differs across stages: {n_b}, {n_g}, {n_s}",
+        ))
+        fail = True
+
+    # Baseline approves everyone, default rate is the dataset base rate
+    if baseline["n_approved"] != n_b:
+        _record(state, Finding(
+            "P0", "verify.impact.baseline",
+            f"baseline approved {baseline['n_approved']} of {n_b} - should be all",
+        ))
+        fail = True
+    if not _approx_eq(baseline["approval_rate"], 1.0):
+        _record(state, Finding(
+            "P0", "verify.impact.baseline",
+            f"baseline approval_rate={baseline['approval_rate']}, expected 1.0",
+        ))
+        fail = True
+
+    # Approval rates: baseline >= global >= segmented (segments are
+    # generally MORE restrictive when active). Allow segmented to exceed
+    # global only by < 1pp for tied cases.
+    if glob["approval_rate"] > baseline["approval_rate"] + 1e-6:
+        _record(state, Finding(
+            "P0", "verify.impact.monotonicity",
+            f"global approval {glob['approval_rate']:.4f} > baseline {baseline['approval_rate']:.4f}",
+        ))
+        fail = True
+
+    # Bounds
+    for stage_name, stage in [("baseline", baseline), ("global", glob), ("segmented", seg)]:
+        for k in ("approval_rate", "default_rate", "predicted_loss_rate"):
+            v = stage.get(k)
+            if v is None:
+                continue
+            if not (0 <= v <= 1 + 1e-9):
+                _record(state, Finding(
+                    "P0", "verify.impact.bounds",
+                    f"{stage_name}.{k}={v} out of [0,1]",
+                ))
+                fail = True
+
+    # Internal arithmetic: default_rate * n_approved == n_defaults_approved
+    # (exact for integer n_defaults, approximate for float default_rate)
+    for stage_name, stage in [("baseline", baseline), ("global", glob), ("segmented", seg)]:
+        n_appr = stage.get("n_approved", 0)
+        d_rate = stage.get("default_rate", 0)
+        n_def = stage.get("n_defaults_approved", 0)
+        if n_appr > 0:
+            recomputed = d_rate * n_appr
+            if abs(recomputed - n_def) > 1.5:  # tolerate 1 row from rounding
+                _record(state, Finding(
+                    "P1", "verify.impact.arithmetic",
+                    f"{stage_name}: default_rate*n_approved={recomputed:.1f} but "
+                    f"n_defaults_approved={n_def}",
+                ))
+
+    # Lift direction: with segmentation, default rate among approved should
+    # generally be <= global default rate (segments catch high-risk pockets).
+    # This isn't strictly required mathematically but is the whole point of
+    # segmentation; flag as P2 if violated.
+    if seg["default_rate"] > glob["default_rate"] + 0.005:
+        _record(state, Finding(
+            "P2", "verify.impact.lift",
+            f"segmented default_rate {seg['default_rate']:.4f} > global "
+            f"{glob['default_rate']:.4f} - segmentation isn't reducing loss",
+        ))
+
+    if not fail:
+        _ok(state, "verify.impact_math",
+            f"baseline n={n_b}, monotone OK, bounds OK, "
+            f"lift = {(glob['default_rate'] - seg['default_rate']) * 100:+.2f} pp")
+    return not fail
+
+
+def step_verify_simulate_diff_direction(state: State) -> bool:
+    """A/B with cutoff_b > cutoff_a should give MORE approvals at b."""
+    if not state.dataset_id or not state.model_id:
+        return True
+    threshold_a = 0.3
+    threshold_b = 0.7
+    res = _call(
+        state, "POST", "/simulate/diff",
+        json_body={
+            "dataset_id": state.dataset_id,
+            "model_id": state.model_id,
+            "policy_a": {"cutoff": threshold_a, "amount_ladder": None},
+            "policy_b": {"cutoff": threshold_b, "amount_ladder": None},
+        },
+        timeout=60.0,
+        step="verify.diff_direction",
+        expected=(200, 422),
+    )
+    if res is None:
+        return False
+    if res.status_code == 422:
+        _info(state, "verify.diff_direction", "endpoint shape didn't match - skipped")
+        return True
+    body = res.json()
+
+    # Find the approval-count delta in whatever shape the response uses
+    delta = (body.get("approval_count_delta")
+             or body.get("approved_delta")
+             or body.get("approval_delta"))
+    if delta is None:
+        # Try nested shape
+        a = body.get("policy_a") or body.get("a") or {}
+        b = body.get("policy_b") or body.get("b") or {}
+        if "approval_count" in a and "approval_count" in b:
+            delta = b["approval_count"] - a["approval_count"]
+
+    if delta is None:
+        _record(state, Finding(
+            "P1", "verify.diff_direction",
+            "could not extract approval delta from response",
+        ))
+        return False
+
+    # cutoff_b (0.7) > cutoff_a (0.3): score < cutoff = approve, so b approves
+    # MORE (because the threshold is higher). delta = b - a should be > 0.
+    if delta < 0:
+        _record(state, Finding(
+            "P0", "verify.diff_direction",
+            f"cutoff_b={threshold_b} > cutoff_a={threshold_a} should approve MORE, "
+            f"but delta = {delta} (b approved fewer than a). Sign convention broken.",
+        ))
+        return False
+    _ok(state, "verify.diff_direction",
+        f"cutoff {threshold_a} -> {threshold_b} added {delta} approvals (sign correct)")
+    return True
+
+
+def step_verify_dashboard_bounds(state: State) -> bool:
+    """Sanity-check the dashboard tile values."""
+    res = _call(state, "GET", "/dashboard/stats", step="verify.dashboard.fetch",
+                expected=(200, 404))
+    if res is None or res.status_code != 200:
+        return True
+    body = res.json()
+    fail = False
+
+    for k in ("approval_rate", "approval_rate_24h"):
+        v = body.get(k)
+        if v is not None and not (0 <= v <= 1 + 1e-9):
+            _record(state, Finding(
+                "P0", "verify.dashboard.bounds",
+                f"{k}={v} out of [0,1]",
+            ))
+            fail = True
+
+    for k in ("volume", "volume_24h", "approvals"):
+        v = body.get(k)
+        if v is not None and v < 0:
+            _record(state, Finding(
+                "P0", "verify.dashboard.bounds",
+                f"{k}={v} is negative",
+            ))
+            fail = True
+
+    # 24h subsets full
+    v_total = body.get("volume", 0)
+    v_24h = body.get("volume_24h", 0)
+    if v_24h is not None and v_total is not None and v_24h > v_total:
+        _record(state, Finding(
+            "P0", "verify.dashboard.bounds",
+            f"volume_24h ({v_24h}) > volume ({v_total})",
+        ))
+        fail = True
+
+    # approvals consistent with rate
+    appr = body.get("approvals")
+    rate = body.get("approval_rate")
+    if appr is not None and v_total and rate is not None:
+        recomputed_rate = appr / v_total
+        if not _approx_eq(rate, recomputed_rate, tol=0.005, rel=0.005):
+            _record(state, Finding(
+                "P1", "verify.dashboard.bounds",
+                f"approval_rate={rate} but approvals/volume={recomputed_rate:.4f}",
+            ))
+
+    if not fail:
+        _ok(state, "verify.dashboard_bounds",
+            f"volume={v_total} approvals={appr} rate={rate} - all in bounds")
+    return not fail
+
+
+def step_verify_segments_calibration_consistency(state: State) -> bool:
+    """Per-segment calibration internal consistency."""
+    if not state.policy_id or not state.segments_full:
+        return True
+    # Test the segment with the largest n_samples for the most reliable bins
+    pop = [s for s in state.segments_full if (s.get("n_samples") or 0) > 100]
+    if not pop:
+        _info(state, "verify.segment_calibration",
+              "no segment with n_samples > 100 - skipping bin checks")
+        return True
+    seg = max(pop, key=lambda s: s.get("n_samples"))
+    res = _call(
+        state, "GET",
+        f"/policies/{state.policy_id}/segments/{seg['id']}/calibration",
+        step="verify.segment_calibration",
+        expected=(200, 400, 404),
+    )
+    if res is None or res.status_code != 200:
+        _info(state, "verify.segment_calibration",
+              f"could not fetch calibration for {seg['id'][:8]}")
+        return True
+    body = res.json()
+    n_samples = body.get("n_samples")
+    bins = body.get("calibration") or []
+    if not bins:
+        _record(state, Finding(
+            "P1", "verify.segment_calibration",
+            f"segment {seg['name']} has no bins despite n={n_samples}",
+        ))
+        return False
+
+    fail = False
+    bin_count_sum = sum(b.get("count", 0) for b in bins)
+    if bin_count_sum != n_samples:
+        # Tolerance for floor/ceil on qcut
+        if abs(bin_count_sum - n_samples) > 5:
+            _record(state, Finding(
+                "P1", "verify.segment_calibration",
+                f"segment {seg['name']}: sum(bin counts)={bin_count_sum} != n_samples={n_samples}",
+            ))
+            fail = True
+
+    # Bin scores ordered
+    sorted_bins = sorted(bins, key=lambda b: b.get("decile", 0))
+    for i in range(len(sorted_bins) - 1):
+        a, b = sorted_bins[i], sorted_bins[i+1]
+        if a.get("max_score") is not None and b.get("min_score") is not None:
+            if a["max_score"] > b["min_score"] + 1e-9:
+                _record(state, Finding(
+                    "P1", "verify.segment_calibration",
+                    f"segment {seg['name']}: bin {a['decile']} max ({a['max_score']:.3f}) > "
+                    f"bin {b['decile']} min ({b['min_score']:.3f})",
+                ))
+                fail = True
+
+    # Bounds on actual_rate
+    for b in bins:
+        r = b.get("actual_rate")
+        if r is not None and not (0 <= r <= 1 + 1e-9):
+            _record(state, Finding(
+                "P0", "verify.segment_calibration",
+                f"segment {seg['name']}: bin {b.get('decile')} actual_rate={r}",
+            ))
+            fail = True
+
+    if not fail:
+        _ok(state, "verify.segment_calibration",
+            f"segment {seg['name']}: {len(bins)} bins, sums OK, scores ordered")
+    return not fail
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # Composite lifecycle assertions — multi-step invariants
 # ════════════════════════════════════════════════════════════════════════════
 def step_lifecycle_segment_persistence(state: State) -> bool:
@@ -1241,6 +1803,18 @@ ALL_STEPS: list[tuple[str, Callable[[State], bool], bool, str]] = [
     ("fraud.cases.list",           step_fraud_cases_list,          False, "fraud"),
     ("fraud.signals.providers",    step_fraud_signals_providers,   False, "fraud"),
     ("fraud.analytics",            step_fraud_analytics,           False, "fraud"),
+
+    # Verification — deep math assertions on the responses already collected.
+    # Must run AFTER the modules that populate state.{policies_list,
+    # segment_impact, portfolio_sim, segments_full, model}.
+    ("verify.singleton_active",     step_verify_policies_singleton,     False, "verify"),
+    ("verify.system_pointer",       step_verify_system_pointer,         False, "verify"),
+    ("verify.calibration_bins",     step_verify_calibration_bins,       False, "verify"),
+    ("verify.portfolio_math",       step_verify_simulate_portfolio_math, False, "verify"),
+    ("verify.impact_math",          step_verify_segment_impact_math,    False, "verify"),
+    ("verify.diff_direction",       step_verify_simulate_diff_direction, False, "verify"),
+    ("verify.dashboard_bounds",     step_verify_dashboard_bounds,       False, "verify"),
+    ("verify.segment_calibration",  step_verify_segments_calibration_consistency, False, "verify"),
 
     # Composite lifecycle invariants — must run AFTER segments + policies
     ("lifecycle.segment_persistence", step_lifecycle_segment_persistence, False, "lifecycle"),

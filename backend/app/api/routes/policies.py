@@ -31,6 +31,7 @@ class PolicyCreate(BaseModel):
 class PolicyResponse(BaseModel):
     id: str
     model_id: str
+    decision_system_id: Optional[str] = None
     threshold: float
     projected_approval_rate: Optional[float] = None
     projected_loss_rate: Optional[float] = None
