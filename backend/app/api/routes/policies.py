@@ -82,19 +82,29 @@ async def recommend_amounts(
         raise HTTPException(status_code=404, detail="Model not found")
 
     from app.services.loan_amount import loan_amount_service
+    import logging
     try:
         ladder = await loan_amount_service.generate_ladder(
-            db, 
-            model_id=req.model_id, 
-            dataset_id=req.dataset_id, 
+            db,
+            model_id=req.model_id,
+            dataset_id=req.dataset_id,
             threshold=req.threshold
         )
         return ladder
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(f"Ladder Error: {e}")
-        raise HTTPException(status_code=500, detail="Internal Calculation Error")
+        # Log the full traceback so the underlying cause is debuggable from
+        # Railway logs, and return the actual exception detail to the caller
+        # so the UI shows something better than a generic message.
+        logging.getLogger(__name__).exception(
+            "recommend-amounts failed for model=%s dataset=%s",
+            req.model_id, req.dataset_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ladder generation failed: {type(e).__name__}: {str(e)[:300]}",
+        )
 
 @router.post("/", response_model=PolicyResponse)
 def create_policy(
