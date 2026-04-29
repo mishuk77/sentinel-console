@@ -961,6 +961,142 @@ function PolicyList({ systemId }: { systemId?: string }) {
 
 // ─── Segmentation Tab ─────────────────────────────────────────────────────────
 
+/**
+ * SegmentImpactPanel — 3-row table comparing baseline vs global vs segmented.
+ *
+ * Lives at the top of the Segmentation tab. The query key includes a segment-
+ * thresholds signature, so any change made via the segment-detail panel (save
+ * threshold, override, calibrate) refetches and the table updates live.
+ */
+function SegmentImpactPanel({
+    policyId,
+    segments,
+}: {
+    policyId: string | undefined;
+    segments: PolicySegment[] | undefined;
+}) {
+    // Signature mirrors the backend's _segments_signature so the React Query
+    // cache key flips whenever any threshold changes — that's what makes the
+    // "live update on threshold change" work without a manual invalidation.
+    const sig = useMemo(() => {
+        if (!segments) return "";
+        const rows = [...segments]
+            .sort((a, b) => a.id.localeCompare(b.id))
+            .map(s => `${s.id}:${s.threshold ?? ""}:${s.override_threshold ?? ""}`);
+        return rows.join("|");
+    }, [segments]);
+
+    const { data, isLoading, isFetching, error } = useQuery({
+        queryKey: ["segment-impact", policyId, sig],
+        queryFn: () => segmentsAPI.impact(policyId!).then(r => r.data),
+        enabled: !!policyId && !!segments,
+        staleTime: 30 * 1000,
+    });
+
+    if (!policyId) return null;
+
+    const fmtPct = (v: number | undefined | null) =>
+        v === undefined || v === null ? "—" : `${(v * 100).toFixed(1)}%`;
+
+    const rows = data
+        ? [
+            { label: "Baseline (no policy)", sub: "Approve every application", stage: data.baseline, tone: "muted" as const },
+            { label: "Global policy only",   sub: `Cutoff ${data.global_threshold.toFixed(4)}`, stage: data.global_only, tone: "info" as const },
+            { label: "Global + segments",    sub: `${data.n_segments_active} segment override${data.n_segments_active === 1 ? "" : "s"} applied`, stage: data.segmented, tone: "up" as const },
+        ]
+        : [];
+
+    const seg = data?.segmented;
+    const glob = data?.global_only;
+    // Lift over global: improvement in default rate (lower = better) and
+    // change in approval rate. Positive default-rate delta = segments are
+    // catching more bad loans.
+    const defaultRateDelta = seg && glob ? glob.default_rate - seg.default_rate : 0;
+    const approvalRateDelta = seg && glob ? seg.approval_rate - glob.approval_rate : 0;
+
+    return (
+        <div className="panel">
+            <div className="panel-head">
+                <span className="panel-title flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-info" />
+                    Segmentation Impact
+                </span>
+                <span className="text-2xs text-muted-foreground">
+                    {isFetching && !isLoading && (
+                        <span className="inline-flex items-center gap-1 text-info">
+                            <RefreshCw className="h-3 w-3 animate-spin" /> updating
+                        </span>
+                    )}
+                    {!isFetching && data && (
+                        <span>label: <span className="font-mono text-foreground/80">{data.label_column}</span></span>
+                    )}
+                </span>
+            </div>
+
+            {error ? (
+                <div className="px-5 py-4 text-xs text-destructive">
+                    {(error as any)?.response?.data?.detail || "Failed to compute impact."}
+                </div>
+            ) : isLoading || !data ? (
+                <div className="px-5 py-6 text-xs text-muted-foreground flex items-center gap-2">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    Scoring portfolio…
+                </div>
+            ) : (
+                <>
+                    <table className="dt">
+                        <thead>
+                            <tr>
+                                <th>Stage</th>
+                                <th className="text-right">Approval rate</th>
+                                <th className="text-right">Loss rate (actual {data.label_column})</th>
+                                <th className="text-right">Approved</th>
+                                <th className="text-right">Defaulters approved</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map(r => (
+                                <tr key={r.label}>
+                                    <td>
+                                        <div className="font-medium">{r.label}</div>
+                                        <div className="text-2xs text-muted-foreground font-normal">{r.sub}</div>
+                                    </td>
+                                    <td className="text-right font-mono">{fmtPct(r.stage.approval_rate)}</td>
+                                    <td className={cn(
+                                        "text-right font-mono",
+                                        r.tone === "up" && "text-up font-semibold",
+                                    )}>{fmtPct(r.stage.default_rate)}</td>
+                                    <td className="text-right font-mono text-muted-foreground">
+                                        {r.stage.n_approved.toLocaleString()} / {r.stage.n_total.toLocaleString()}
+                                    </td>
+                                    <td className="text-right font-mono text-muted-foreground">
+                                        {r.stage.n_defaults_approved.toLocaleString()}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {seg && glob && data.n_segments_active > 0 && (
+                        <div className="px-5 py-3 border-t bg-muted/10 text-2xs text-muted-foreground">
+                            <strong className="text-foreground">Lift over global only:</strong>{" "}
+                            loss rate {defaultRateDelta >= 0 ? "↓" : "↑"}{" "}
+                            <span className={defaultRateDelta >= 0 ? "text-up font-semibold" : "text-down font-semibold"}>
+                                {(Math.abs(defaultRateDelta) * 100).toFixed(2)} pp
+                            </span>
+                            , approval rate {approvalRateDelta >= 0 ? "↑" : "↓"}{" "}
+                            <span className="font-semibold text-foreground">
+                                {(Math.abs(approvalRateDelta) * 100).toFixed(2)} pp
+                            </span>
+                            . Segmentation is catching higher-risk pockets the global cutoff misses.
+                        </div>
+                    )}
+                </>
+            )}
+        </div>
+    );
+}
+
+
 function SegmentationTab({
     policyId,
     globalThreshold,
@@ -1199,6 +1335,10 @@ function SegmentationTab({
                     <button onClick={() => setCalibrateError(null)}><X className="h-4 w-4 text-destructive" /></button>
                 </div>
             )}
+
+            {/* 3-stage impact comparison: refetches every time a segment
+                threshold or override changes (signature is in the query key). */}
+            <SegmentImpactPanel policyId={policyId} segments={segments} />
 
             {/* Segment detail panel — replaces table when a segment is selected */}
             {selectedSegment && (

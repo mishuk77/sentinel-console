@@ -784,3 +784,207 @@ async def _calibrate_segments_impl(
         .order_by(PolicySegment.n_samples.desc())
         .all()
     )
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Segmentation impact comparison
+# ────────────────────────────────────────────────────────────────────────
+# Lightweight in-process LRU. Keyed on (policy_id, model_artifact_path,
+# segments_signature). The signature changes whenever any segment's
+# threshold/override/filters change, so the table refreshes on every edit
+# but stays cheap when the user just navigates back.
+_IMPACT_CACHE: "OrderedDict[tuple, dict]" = __import__("collections").OrderedDict()
+_IMPACT_CACHE_MAX = 16
+
+
+def _segments_signature(segments) -> str:
+    """Stable hash of the inputs that affect the segmented stage."""
+    import hashlib, json
+    rows = []
+    for s in sorted(segments, key=lambda x: x.id):
+        rows.append({
+            "id": s.id,
+            "filters": s.filters or {},
+            "threshold": s.threshold,
+            "override": s.override_threshold,
+            "is_global": s.is_global,
+        })
+    blob = json.dumps(rows, sort_keys=True, default=str).encode()
+    return hashlib.sha1(blob).hexdigest()[:16]
+
+
+@router.get("/{policy_id}/segments/impact")
+def get_segment_impact(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    3-stage impact comparison for the Segmentation tab:
+
+      • baseline      — approve everyone, no policy
+      • global_only   — approve where score < global threshold
+      • segmented     — approve where score < per-row effective threshold
+                        (segment override > segment threshold > global cutoff;
+                         most-restrictive wins for overlapping segments)
+
+    Each stage returns approval_rate and default_rate (actual y-true charge-off
+    rate among approved). This is the table that proves segmentation pays off.
+    """
+    import logging
+    import traceback
+    try:
+        return _segment_impact_impl(policy_id, db, current_user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.getLogger(__name__).exception(
+            "get_segment_impact unhandled error policy_id=%s", policy_id
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Impact analysis failed: {type(e).__name__}: {str(e)[:300]}",
+        )
+
+
+def _segment_impact_impl(policy_id: str, db: Session, current_user: User) -> dict:
+    import tempfile
+    import os
+    import numpy as np
+    import pandas as pd
+    from app.services.storage import storage
+
+    policy = _get_policy_authorized(policy_id, db, current_user)
+
+    model = db.query(MLModel).filter(MLModel.id == policy.model_id).first()
+    if not model or not model.artifact_path:
+        raise HTTPException(status_code=404, detail="Model not found or has no artifact")
+
+    dataset = db.query(Dataset).filter(Dataset.id == model.dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    segments = (
+        db.query(PolicySegment)
+        .filter(PolicySegment.policy_id == policy_id, PolicySegment.is_active == True)
+        .all()
+    )
+
+    sig = _segments_signature(segments)
+    cache_key = (policy_id, model.artifact_path, policy.threshold, sig)
+    cached = _IMPACT_CACHE.get(cache_key)
+    if cached is not None:
+        _IMPACT_CACHE.move_to_end(cache_key)
+        return cached
+
+    # ── Load dataset ──────────────────────────────────────────────────
+    tmp_fd, temp_path = tempfile.mkstemp(suffix=".csv")
+    os.close(tmp_fd)
+    try:
+        storage.download_file(dataset.s3_key, temp_path)
+        df = pd.read_csv(temp_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    # ── Resolve label column (same logic as calibrate) ────────────────
+    metadata = dataset.metadata_info or {}
+    latest_model = (
+        db.query(MLModel)
+        .filter(MLModel.dataset_id == dataset.id)
+        .filter(MLModel.target_column.isnot(None))
+        .order_by(MLModel.created_at.desc())
+        .first()
+    )
+    label_col = (
+        (latest_model.target_column if latest_model else None)
+        or metadata.get("label_column")
+        or "charge_off"
+    )
+    if label_col not in df.columns:
+        for candidate in ["charge_off", "default", "label", "target", "is_default"]:
+            if candidate in df.columns:
+                label_col = candidate
+                break
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Label column not found in dataset. Available: {list(df.columns)}",
+            )
+
+    n = len(df)
+    y = pd.to_numeric(df[label_col], errors="coerce").fillna(0).values.astype(float)
+
+    # ── Score the dataset once ────────────────────────────────────────
+    exclude_lower = {
+        "id", "customer_id", "created_at", "applicant_id",
+        "uuid", "name", "email", "phone", label_col.lower(),
+    }
+    feature_cols = [
+        c for c in df.columns
+        if c.lower() not in exclude_lower and not c.lower().endswith("id")
+    ]
+    X = df[feature_cols].copy()
+
+    artifact = _load_model_artifact(model.artifact_path, model, db, storage)
+    scores = _predict_proba_from_artifact(artifact, X)
+
+    # ── Build per-row effective threshold for the segmented stage ─────
+    global_threshold = policy.threshold if policy.threshold is not None else 1.0
+    row_thresholds = np.full(n, float(global_threshold))
+
+    for seg in segments:
+        if seg.is_global or not seg.filters:
+            continue
+        # Effective threshold for this segment: override beats base
+        eff = seg.override_threshold if seg.override_threshold is not None else seg.threshold
+        if eff is None:
+            continue
+        mask = np.ones(n, dtype=bool)
+        all_match = True
+        for col, val in seg.filters.items():
+            if col not in df.columns:
+                all_match = False
+                break
+            mask &= (df[col].astype(str) == str(val)).values
+        if not all_match:
+            continue
+        # Cascade rule: most restrictive (lowest) threshold wins
+        row_thresholds[mask] = np.minimum(row_thresholds[mask], float(eff))
+
+    def _stage(approved_mask: np.ndarray) -> dict:
+        approval_count = int(approved_mask.sum())
+        approval_rate = approval_count / n if n > 0 else 0.0
+        defaults_in_approved = float(y[approved_mask].sum()) if approval_count > 0 else 0.0
+        default_rate = defaults_in_approved / approval_count if approval_count > 0 else 0.0
+        # Predicted default rate (model's expected loss)
+        predicted_loss = float(scores[approved_mask].sum()) if approval_count > 0 else 0.0
+        predicted_loss_rate = predicted_loss / approval_count if approval_count > 0 else 0.0
+        return {
+            "n_total": n,
+            "n_approved": approval_count,
+            "approval_rate": approval_rate,
+            "n_defaults_approved": int(defaults_in_approved),
+            "default_rate": default_rate,
+            "predicted_loss_rate": predicted_loss_rate,
+        }
+
+    result = {
+        "label_column": label_col,
+        "global_threshold": float(global_threshold),
+        "n_segments_active": sum(
+            1
+            for s in segments
+            if not s.is_global
+            and s.filters
+            and (s.override_threshold is not None or s.threshold is not None)
+        ),
+        "baseline": _stage(np.ones(n, dtype=bool)),
+        "global_only": _stage(scores < global_threshold),
+        "segmented": _stage(scores < row_thresholds),
+    }
+
+    _IMPACT_CACHE[cache_key] = result
+    if len(_IMPACT_CACHE) > _IMPACT_CACHE_MAX:
+        _IMPACT_CACHE.popitem(last=False)
+    return result

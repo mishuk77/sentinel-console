@@ -599,7 +599,28 @@ export const segmentsAPI = {
         api.get<{ segment_id: string; n_samples: number; calibration: any[] }>(
             `/policies/${policyId}/segments/${segmentId}/calibration`
         ),
+
+    impact: (policyId: string) =>
+        api.get<SegmentImpactResponse>(`/policies/${policyId}/segments/impact`),
 };
+
+export interface SegmentImpactStage {
+    n_total: number;
+    n_approved: number;
+    approval_rate: number;
+    n_defaults_approved: number;
+    default_rate: number;
+    predicted_loss_rate: number;
+}
+
+export interface SegmentImpactResponse {
+    label_column: string;
+    global_threshold: number;
+    n_segments_active: number;
+    baseline: SegmentImpactStage;
+    global_only: SegmentImpactStage;
+    segmented: SegmentImpactStage;
+}
 
 // ==================== Policies ====================
 
