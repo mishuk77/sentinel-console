@@ -44,15 +44,21 @@ class DecisionService:
         """Compute SHAP values for a model. Returns list of (feature, value) sorted by abs contribution."""
         try:
             import shap
-            model_type = type(clf).__name__.lower()
+            # Unwrap CalibratedClassifierCV — TreeExplainer / coef_ access
+            # need the inner base estimator. Without this, calibrated
+            # models silently produce empty SHAP values (the type check
+            # below returns "calibratedclassifiercv" which doesn't match).
+            from app.services.training import _unwrap_calibrated
+            base = _unwrap_calibrated(clf)
+            model_type = type(base).__name__.lower()
             explainer = None
 
-            if "xgb" in model_type or "forest" in model_type:
-                explainer = shap.TreeExplainer(clf)
+            if "xgb" in model_type or "forest" in model_type or "lgbm" in model_type or "boost" in model_type:
+                explainer = shap.TreeExplainer(base)
                 shap_values = explainer.shap_values(df)
-            elif "logistic" in model_type and hasattr(clf, "coef_"):
+            elif "logistic" in model_type and hasattr(base, "coef_"):
                 # Approximate SHAP for linear: coefficient * feature value
-                coefs = clf.coef_[0]
+                coefs = base.coef_[0]
                 row = df.iloc[0].values
                 contributions = dict(zip(df.columns, [float(c * v) for c, v in zip(coefs, row)]))
                 return sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)

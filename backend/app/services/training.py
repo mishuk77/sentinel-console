@@ -38,6 +38,42 @@ logger = logging.getLogger("sentinel.training")
 N_JOBS = -1 if _ENV == "local" else 1
 
 
+def _unwrap_calibrated(clf):
+    """
+    Get the inner base classifier from a CalibratedClassifierCV wrapper.
+
+    The post-hoc calibration step wraps trained classifiers with
+    CalibratedClassifierCV(cv=3), which fits 3 separate base estimators
+    on different folds and averages their calibrated outputs. The
+    wrapper itself doesn't expose coef_ / feature_importances_ — those
+    live on the inner estimators (clf.calibrated_classifiers_[i].estimator).
+
+    For UI purposes (feature importance display, SHAP) we just take the
+    first inner estimator. The 3 fold-trained estimators have very
+    similar coefficients/importances since they share most of the
+    training data.
+
+    Returns the original classifier when not wrapped (idempotent).
+    """
+    try:
+        from sklearn.calibration import CalibratedClassifierCV
+        if isinstance(clf, CalibratedClassifierCV):
+            inner_list = getattr(clf, "calibrated_classifiers_", None)
+            if inner_list:
+                first = inner_list[0]
+                # sklearn changed the attribute name across versions —
+                # 1.4+ uses 'estimator', earlier versions used 'base_estimator'.
+                inner_clf = (
+                    getattr(first, "estimator", None)
+                    or getattr(first, "base_estimator", None)
+                )
+                if inner_clf is not None:
+                    return inner_clf
+    except Exception:
+        pass
+    return clf
+
+
 # ── Event Store Abstraction ───────────────────────────────────────────────────
 
 class InMemoryEventStore:
@@ -876,8 +912,15 @@ class TrainingService:
 
     def _compute_feature_importance(self, name, clf, columns):
         try:
+            # Unwrap CalibratedClassifierCV — the post-hoc calibration step
+            # wraps the base classifier; coef_ / feature_importances_ live
+            # on the inner estimators, not the wrapper. Without this, the
+            # Top Risk Drivers panel comes up empty for any model that
+            # was calibrated (i.e. all imbalanced-data models).
+            base = _unwrap_calibrated(clf)
+
             if name == "logistic_regression":
-                coeffs = clf.coef_[0]
+                coeffs = base.coef_[0]
                 total_abs = sum(abs(c) for c in coeffs) or 1.0
                 fi = [{"feature": feat, "importance": abs(coef),
                        "normalized": round(abs(coef) / total_abs, 4),
@@ -885,7 +928,7 @@ class TrainingService:
                        "raw_value": float(coef)}
                       for feat, coef in zip(columns, coeffs)]
             elif name in ["random_forest", "xgboost", "lightgbm"]:
-                imps = clf.feature_importances_
+                imps = base.feature_importances_
                 total = sum(imps) or 1.0
                 fi = [{"feature": feat, "importance": float(imp),
                        "normalized": round(float(imp) / total, 4),

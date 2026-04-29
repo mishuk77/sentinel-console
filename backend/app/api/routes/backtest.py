@@ -770,7 +770,13 @@ def _compute_batch_shap(
             return None
 
         clf = artifact["model"]
-        model_type = type(clf).__name__.lower()
+
+        # Unwrap CalibratedClassifierCV if present — TreeExplainer needs
+        # the raw tree estimator, not the calibration wrapper. Without
+        # this, calibrated tree models produce no SHAP values silently.
+        from app.services.training import _unwrap_calibrated
+        base = _unwrap_calibrated(clf)
+        model_type = type(base).__name__.lower()
 
         # Only batch-friendly tree models in this MVP
         if not any(t in model_type for t in ("xgb", "lgb", "forest", "boost")):
@@ -785,7 +791,7 @@ def _compute_batch_shap(
         # Trim to first n rows for the persisted slice
         X_for_shap = X_proc.iloc[: min(n, len(X_proc))]
 
-        explainer = shap.TreeExplainer(clf)
+        explainer = shap.TreeExplainer(base)
         shap_values = explainer.shap_values(X_for_shap)
         if isinstance(shap_values, list):
             # Multiclass — pick the positive-class contributions

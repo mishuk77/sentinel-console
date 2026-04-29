@@ -308,6 +308,49 @@ def test_unscaled_model_does_not_apply_scaler(
 # Direct reproduction of the legacy bug — proves the fix works
 # ─────────────────────────────────────────────────────────────────────────────
 
+def test_unwrap_calibrated_exposes_inner_estimator_attributes():
+    """
+    The Top Risk Drivers panel and SHAP both need direct access to the
+    base estimator's coef_ / feature_importances_ attributes —
+    CalibratedClassifierCV doesn't expose those on the wrapper. The
+    _unwrap_calibrated() helper must return an object on which we can
+    read coef_ (LR) or feature_importances_ (trees).
+    """
+    import numpy as np
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.ensemble import RandomForestClassifier
+
+    from app.services.training import _unwrap_calibrated
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(200, 5))
+    y = rng.binomial(1, 0.3, size=200)
+
+    # LR — must expose coef_ after unwrap
+    lr = LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
+    lr.fit(X, y)
+    cal_lr = CalibratedClassifierCV(lr, method="isotonic", cv=3)
+    cal_lr.fit(X, y)
+    base_lr = _unwrap_calibrated(cal_lr)
+    assert hasattr(base_lr, "coef_"), "Unwrapped LR is missing coef_"
+    assert base_lr.coef_.shape == (1, 5)
+
+    # Random Forest — must expose feature_importances_ after unwrap
+    rf = RandomForestClassifier(n_estimators=10, class_weight="balanced", random_state=42)
+    rf.fit(X, y)
+    cal_rf = CalibratedClassifierCV(rf, method="isotonic", cv=3)
+    cal_rf.fit(X, y)
+    base_rf = _unwrap_calibrated(cal_rf)
+    assert hasattr(base_rf, "feature_importances_"), "Unwrapped RF is missing feature_importances_"
+    assert len(base_rf.feature_importances_) == 5
+
+    # Idempotent on already-unwrapped models
+    raw_lr = LogisticRegression(max_iter=1000)
+    raw_lr.fit(X, y)
+    assert _unwrap_calibrated(raw_lr) is raw_lr  # no-op when not calibrated
+
+
 def test_calibrated_classifier_serializes_and_predicts(
     synthetic_credit_dataset, feature_columns,
 ):
